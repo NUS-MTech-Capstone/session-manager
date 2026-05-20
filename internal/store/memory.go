@@ -1,0 +1,153 @@
+package store
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sort"
+	"sync"
+	"time"
+
+	"github.com/NUS-MTech-Capstone/session-manager/internal/model"
+)
+
+var (
+	ErrNoAvailablePod = errors.New("no available proxy dataplane pod")
+	ErrNotFound       = errors.New("not found")
+)
+
+type MemoryStore struct {
+	mu       sync.RWMutex
+	sessions map[string]model.Session
+	pods     map[string]model.ProxyPod
+	now      func() time.Time
+}
+
+func NewMemoryStore() *MemoryStore {
+	return &MemoryStore{
+		sessions: make(map[string]model.Session),
+		pods:     make(map[string]model.ProxyPod),
+		now:      time.Now,
+	}
+}
+
+func (s *MemoryStore) RegisterPod(_ context.Context, pod model.ProxyPod) model.ProxyPod {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pod.LastHeartbeatAt = s.now().UTC()
+	if pod.Status == "" {
+		pod.Status = model.PodStatusReady
+	}
+	if pod.MaxSessions == 0 {
+		pod.MaxSessions = 50
+	}
+	s.pods[pod.PodID] = pod
+	return pod
+}
+
+func (s *MemoryStore) HeartbeatPod(ctx context.Context, pod model.ProxyPod) model.ProxyPod {
+	return s.RegisterPod(ctx, pod)
+}
+
+func (s *MemoryStore) AvailablePods(_ context.Context, maxAge time.Duration) []model.ProxyPod {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	cutoff := s.now().Add(-maxAge)
+	var pods []model.ProxyPod
+	for _, pod := range s.pods {
+		if pod.Status == model.PodStatusReady && pod.LastHeartbeatAt.After(cutoff) && pod.ActiveSessions < pod.MaxSessions {
+			pods = append(pods, pod)
+		}
+	}
+	sort.Slice(pods, func(i, j int) bool {
+		if pods[i].ActiveSessions == pods[j].ActiveSessions {
+			return pods[i].PodID < pods[j].PodID
+		}
+		return pods[i].ActiveSessions < pods[j].ActiveSessions
+	})
+	return pods
+}
+
+func (s *MemoryStore) CreateSession(_ context.Context, req model.CreateSessionRequest, heartbeatMaxAge time.Duration, lease time.Duration) (model.Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.now().UTC()
+	cutoff := now.Add(-heartbeatMaxAge)
+	var chosen *model.ProxyPod
+	for _, pod := range s.pods {
+		pod := pod
+		if pod.Status != model.PodStatusReady || !pod.LastHeartbeatAt.After(cutoff) || pod.ActiveSessions >= pod.MaxSessions {
+			continue
+		}
+		if chosen == nil || pod.ActiveSessions < chosen.ActiveSessions || pod.ActiveSessions == chosen.ActiveSessions && pod.PodID < chosen.PodID {
+			chosen = &pod
+		}
+	}
+	if chosen == nil {
+		return model.Session{}, ErrNoAvailablePod
+	}
+	chosen.ActiveSessions++
+	s.pods[chosen.PodID] = *chosen
+
+	id := fmt.Sprintf("sess-%d", now.UnixNano())
+	session := model.Session{
+		SessionID:       id,
+		UserID:          req.UserID,
+		HostID:          req.HostID,
+		CRID:            req.CRID,
+		OwnerPodID:      chosen.PodID,
+		OwnerInstanceID: chosen.InstanceID,
+		WebsocketURL:    fmt.Sprintf("%s/sessions/%s/ws", chosen.WebsocketURL, id),
+		Status:          model.SessionStatusActive,
+		CreatedAt:       now,
+		LastHeartbeatAt: now,
+		LeaseExpiresAt:  now.Add(lease),
+	}
+	s.sessions[id] = session
+	return session, nil
+}
+
+func (s *MemoryStore) GetSession(_ context.Context, id string) (model.Session, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	session, ok := s.sessions[id]
+	if !ok {
+		return model.Session{}, ErrNotFound
+	}
+	return session, nil
+}
+
+func (s *MemoryStore) HeartbeatSession(_ context.Context, id string, req model.SessionHeartbeatRequest, lease time.Duration) (model.Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	session, ok := s.sessions[id]
+	if !ok {
+		return model.Session{}, ErrNotFound
+	}
+	if session.OwnerPodID != req.OwnerPodID || session.OwnerInstanceID != req.OwnerInstanceID {
+		return model.Session{}, errors.New("session owner mismatch")
+	}
+	now := s.now().UTC()
+	session.LastHeartbeatAt = now
+	session.LeaseExpiresAt = now.Add(lease)
+	s.sessions[id] = session
+	return session, nil
+}
+
+func (s *MemoryStore) CloseSession(_ context.Context, id string) (model.Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	session, ok := s.sessions[id]
+	if !ok {
+		return model.Session{}, ErrNotFound
+	}
+	if session.Status != model.SessionStatusClosed {
+		session.Status = model.SessionStatusClosed
+		if pod, ok := s.pods[session.OwnerPodID]; ok && pod.ActiveSessions > 0 {
+			pod.ActiveSessions--
+			s.pods[pod.PodID] = pod
+		}
+	}
+	s.sessions[id] = session
+	return session, nil
+}
