@@ -1,4 +1,3 @@
-# session-manager
 # Session Manager
 
 In-memory MVP registry for active sessions and proxy dataplane pods.
