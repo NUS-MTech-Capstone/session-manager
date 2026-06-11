@@ -14,13 +14,26 @@ go run ./cmd/server
 Postgres:
 
 ```bash
-PORT=8081 \
-STORE_DRIVER=postgres \
-DATABASE_URL='postgres://dendenmushi:dendenmushi@localhost:5432/dendenmushi?sslmode=disable' \
-go run ./cmd/server
+make run-postgres
 ```
 
 The Postgres tables and indexes are created idempotently at startup.
+The Compose database stores its data in the `session-manager-postgres` volume.
+
+Run the store integration tests against Postgres with:
+
+```bash
+make test-postgres
+```
+
+For an externally managed database, run:
+
+```bash
+PORT=8081 \
+STORE_DRIVER=postgres \
+DATABASE_URL='postgres://user:password@host:5432/database?sslmode=require' \
+go run ./cmd/server
+```
 
 ## Endpoints
 
