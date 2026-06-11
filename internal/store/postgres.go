@@ -271,20 +271,24 @@ SET last_heartbeat_at = $1, lease_expires_at = $2
 WHERE session_id = $3
 	AND owner_pod_id = $4
 	AND owner_instance_id = $5
+	AND status = $6
 RETURNING session_id, user_id, host_id, cr_id, owner_pod_id, owner_instance_id,
 	websocket_url, status, created_at, last_heartbeat_at, lease_expires_at
 `
 	var session model.Session
 	err := scanSession(s.db.QueryRowContext(
-		ctx, query, now, now.Add(lease), id, req.OwnerPodID, req.OwnerInstanceID,
+		ctx, query, now, now.Add(lease), id, req.OwnerPodID, req.OwnerInstanceID, model.SessionStatusActive,
 	), &session)
 	if errors.Is(err, sql.ErrNoRows) {
-		_, getErr := s.GetSession(ctx, id)
+		existing, getErr := s.GetSession(ctx, id)
 		if errors.Is(getErr, ErrNotFound) {
 			return model.Session{}, ErrNotFound
 		}
 		if getErr != nil {
 			return model.Session{}, getErr
+		}
+		if existing.Status != model.SessionStatusActive {
+			return model.Session{}, ErrSessionNotActive
 		}
 		return model.Session{}, errors.New("session owner mismatch")
 	}

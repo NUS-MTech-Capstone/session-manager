@@ -23,6 +23,26 @@ func TestCreateSessionChoosesReadyPodWithLowestActiveSessions(t *testing.T) {
 	}
 }
 
+func TestAvailablePodsReturnsHealthyPodsByLoad(t *testing.T) {
+	st := NewMemoryStore()
+	now := time.Now()
+	st.now = func() time.Time { return now }
+	ctx := context.Background()
+
+	_, _ = st.RegisterPod(ctx, model.ProxyPod{PodID: "loaded", InstanceID: "i-1", WebsocketURL: "ws://loaded", Status: model.PodStatusReady, ActiveSessions: 3, MaxSessions: 5})
+	_, _ = st.RegisterPod(ctx, model.ProxyPod{PodID: "least", InstanceID: "i-2", WebsocketURL: "ws://least", Status: model.PodStatusReady, ActiveSessions: 1, MaxSessions: 5})
+	_, _ = st.RegisterPod(ctx, model.ProxyPod{PodID: "not-ready", InstanceID: "i-3", WebsocketURL: "ws://not-ready", Status: "DRAINING", MaxSessions: 5})
+	_, _ = st.RegisterPod(ctx, model.ProxyPod{PodID: "full", InstanceID: "i-4", WebsocketURL: "ws://full", Status: model.PodStatusReady, ActiveSessions: 5, MaxSessions: 5})
+
+	pods, err := st.AvailablePods(ctx, 15*time.Second)
+	if err != nil {
+		t.Fatalf("AvailablePods() error = %v", err)
+	}
+	if len(pods) != 2 || pods[0].PodID != "least" || pods[1].PodID != "loaded" {
+		t.Fatalf("AvailablePods() = %#v, want least then loaded", pods)
+	}
+}
+
 func TestCreateSessionRejectsStalePods(t *testing.T) {
 	st := NewMemoryStore()
 	now := time.Now()
@@ -73,5 +93,96 @@ func TestRegistrationResetsReservationsForNewInstance(t *testing.T) {
 	}
 	if pod.ActiveSessions != 0 {
 		t.Fatalf("ActiveSessions = %d, want 0", pod.ActiveSessions)
+	}
+}
+
+func TestSessionHeartbeatExtendsLeaseForOwner(t *testing.T) {
+	st := NewMemoryStore()
+	now := time.Now()
+	st.now = func() time.Time { return now }
+	ctx := context.Background()
+	_, _ = st.RegisterPod(ctx, model.ProxyPod{
+		PodID: "pod", InstanceID: "instance-1", WebsocketURL: "ws://pod", MaxSessions: 50,
+	})
+	session, err := st.CreateSession(
+		ctx,
+		model.CreateSessionRequest{UserID: "u", HostID: "h", CRID: "cr"},
+		15*time.Second,
+		time.Minute,
+	)
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+
+	now = now.Add(10 * time.Second)
+	heartbeat, err := st.HeartbeatSession(ctx, session.SessionID, model.SessionHeartbeatRequest{
+		OwnerPodID: "pod", OwnerInstanceID: "instance-1",
+	}, time.Minute)
+	if err != nil {
+		t.Fatalf("HeartbeatSession() error = %v", err)
+	}
+	if !heartbeat.LastHeartbeatAt.Equal(now.UTC()) || !heartbeat.LeaseExpiresAt.Equal(now.UTC().Add(time.Minute)) {
+		t.Fatalf("heartbeat timestamps = %s/%s, want %s/%s", heartbeat.LastHeartbeatAt, heartbeat.LeaseExpiresAt, now.UTC(), now.UTC().Add(time.Minute))
+	}
+}
+
+func TestCloseSessionUpdatesStatusAndReleasesPodOnce(t *testing.T) {
+	st := NewMemoryStore()
+	ctx := context.Background()
+	_, _ = st.RegisterPod(ctx, model.ProxyPod{
+		PodID: "pod", InstanceID: "instance-1", WebsocketURL: "ws://pod", MaxSessions: 1,
+	})
+	session, err := st.CreateSession(
+		ctx,
+		model.CreateSessionRequest{UserID: "u", HostID: "h", CRID: "cr"},
+		15*time.Second,
+		time.Minute,
+	)
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+
+	for range 2 {
+		closed, err := st.CloseSession(ctx, session.SessionID)
+		if err != nil {
+			t.Fatalf("CloseSession() error = %v", err)
+		}
+		if closed.Status != model.SessionStatusClosed {
+			t.Fatalf("status = %q, want %q", closed.Status, model.SessionStatusClosed)
+		}
+	}
+	pods, err := st.AvailablePods(ctx, 15*time.Second)
+	if err != nil {
+		t.Fatalf("AvailablePods() error = %v", err)
+	}
+	if len(pods) != 1 || pods[0].ActiveSessions != 0 {
+		t.Fatalf("available pods = %#v, want released pod", pods)
+	}
+}
+
+func TestSessionHeartbeatRejectsClosedSession(t *testing.T) {
+	st := NewMemoryStore()
+	ctx := context.Background()
+	_, _ = st.RegisterPod(ctx, model.ProxyPod{
+		PodID: "pod", InstanceID: "instance-1", WebsocketURL: "ws://pod", MaxSessions: 1,
+	})
+	session, err := st.CreateSession(
+		ctx,
+		model.CreateSessionRequest{UserID: "u", HostID: "h", CRID: "cr"},
+		15*time.Second,
+		time.Minute,
+	)
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if _, err := st.CloseSession(ctx, session.SessionID); err != nil {
+		t.Fatalf("CloseSession() error = %v", err)
+	}
+
+	_, err = st.HeartbeatSession(ctx, session.SessionID, model.SessionHeartbeatRequest{
+		OwnerPodID: "pod", OwnerInstanceID: "instance-1",
+	}, time.Minute)
+	if err != ErrSessionNotActive {
+		t.Fatalf("HeartbeatSession() error = %v, want ErrSessionNotActive", err)
 	}
 }

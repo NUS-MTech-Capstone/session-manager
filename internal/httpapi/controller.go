@@ -56,7 +56,13 @@ func (s *Server) sessionAction(w http.ResponseWriter, r *http.Request) {
 		}
 		session, err := s.svc.HeartbeatSession(r.Context(), id, req)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
+			status := http.StatusBadRequest
+			if errors.Is(err, store.ErrNotFound) {
+				status = http.StatusNotFound
+			} else if errors.Is(err, store.ErrSessionNotActive) {
+				status = http.StatusConflict
+			}
+			writeError(w, status, err.Error())
 			return
 		}
 		writeJSON(w, http.StatusOK, session)

@@ -12,8 +12,9 @@ import (
 )
 
 var (
-	ErrNoAvailablePod = errors.New("no available proxy dataplane pod")
-	ErrNotFound       = errors.New("not found")
+	ErrNoAvailablePod   = errors.New("no available proxy dataplane pod")
+	ErrNotFound         = errors.New("not found")
+	ErrSessionNotActive = errors.New("session is not active")
 )
 
 type MemoryStore struct {
@@ -133,6 +134,9 @@ func (s *MemoryStore) HeartbeatSession(_ context.Context, id string, req model.S
 	}
 	if session.OwnerPodID != req.OwnerPodID || session.OwnerInstanceID != req.OwnerInstanceID {
 		return model.Session{}, errors.New("session owner mismatch")
+	}
+	if session.Status != model.SessionStatusActive {
+		return model.Session{}, ErrSessionNotActive
 	}
 	now := s.now().UTC()
 	session.LastHeartbeatAt = now
