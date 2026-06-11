@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/NUS-MTech-Capstone/session-manager/internal/config"
 	"github.com/NUS-MTech-Capstone/session-manager/internal/httpapi"
@@ -12,8 +15,32 @@ import (
 
 func main() {
 	cfg := config.Load()
-	svc := service.New(store.NewMemoryStore(), cfg.HeartbeatMaxAge, cfg.LeaseDuration)
+	st, closeStore, err := newStore(context.Background(), cfg)
+	if err != nil {
+		log.Fatalf("initialize store failed: %v", err)
+	}
+	defer closeStore()
+
+	svc := service.New(st, cfg.HeartbeatMaxAge, cfg.LeaseDuration)
 	addr := ":" + cfg.Port
-	log.Printf("session-manager listening on %s", addr)
+	log.Printf("session-manager listening on %s store=%s", addr, cfg.StoreDriver)
 	log.Fatal(http.ListenAndServe(addr, httpapi.New(svc)))
+}
+
+func newStore(ctx context.Context, cfg config.Config) (store.Store, func(), error) {
+	switch strings.ToLower(cfg.StoreDriver) {
+	case "", "memory":
+		return store.NewMemoryStore(), func() {}, nil
+	case "postgres":
+		if cfg.DatabaseURL == "" {
+			return nil, nil, fmt.Errorf("DATABASE_URL is required when STORE_DRIVER=postgres")
+		}
+		st, err := store.NewPostgresStore(ctx, cfg.DatabaseURL)
+		if err != nil {
+			return nil, nil, err
+		}
+		return st, func() { _ = st.Close() }, nil
+	default:
+		return nil, nil, fmt.Errorf("unsupported STORE_DRIVER %q", cfg.StoreDriver)
+	}
 }

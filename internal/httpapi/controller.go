@@ -82,7 +82,12 @@ func (s *Server) registerPod(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "podId, instanceId and websocketUrl are required")
 		return
 	}
-	writeJSON(w, http.StatusCreated, s.svc.RegisterPod(r.Context(), pod))
+	registered, err := s.svc.RegisterPod(r.Context(), pod)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, registered)
 }
 
 func (s *Server) heartbeatPod(w http.ResponseWriter, r *http.Request) {
@@ -94,11 +99,21 @@ func (s *Server) heartbeatPod(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "podId, instanceId and websocketUrl are required")
 		return
 	}
-	writeJSON(w, http.StatusOK, s.svc.HeartbeatPod(r.Context(), pod))
+	heartbeat, err := s.svc.HeartbeatPod(r.Context(), pod)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, heartbeat)
 }
 
 func (s *Server) availablePods(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.svc.AvailablePods(r.Context()))
+	pods, err := s.svc.AvailablePods(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, pods)
 }
 
 func parseSessionPath(path string) (string, string) {

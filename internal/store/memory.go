@@ -23,6 +23,8 @@ type MemoryStore struct {
 	now      func() time.Time
 }
 
+var _ Store = (*MemoryStore)(nil)
+
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		sessions: make(map[string]model.Session),
@@ -31,7 +33,7 @@ func NewMemoryStore() *MemoryStore {
 	}
 }
 
-func (s *MemoryStore) RegisterPod(_ context.Context, pod model.ProxyPod) model.ProxyPod {
+func (s *MemoryStore) RegisterPod(_ context.Context, pod model.ProxyPod) (model.ProxyPod, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	pod.LastHeartbeatAt = s.now().UTC()
@@ -41,15 +43,20 @@ func (s *MemoryStore) RegisterPod(_ context.Context, pod model.ProxyPod) model.P
 	if pod.MaxSessions == 0 {
 		pod.MaxSessions = 50
 	}
+	if existing, ok := s.pods[pod.PodID]; ok &&
+		existing.InstanceID == pod.InstanceID &&
+		existing.ActiveSessions > pod.ActiveSessions {
+		pod.ActiveSessions = existing.ActiveSessions
+	}
 	s.pods[pod.PodID] = pod
-	return pod
+	return pod, nil
 }
 
-func (s *MemoryStore) HeartbeatPod(ctx context.Context, pod model.ProxyPod) model.ProxyPod {
+func (s *MemoryStore) HeartbeatPod(ctx context.Context, pod model.ProxyPod) (model.ProxyPod, error) {
 	return s.RegisterPod(ctx, pod)
 }
 
-func (s *MemoryStore) AvailablePods(_ context.Context, maxAge time.Duration) []model.ProxyPod {
+func (s *MemoryStore) AvailablePods(_ context.Context, maxAge time.Duration) ([]model.ProxyPod, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	cutoff := s.now().Add(-maxAge)
@@ -65,7 +72,7 @@ func (s *MemoryStore) AvailablePods(_ context.Context, maxAge time.Duration) []m
 		}
 		return pods[i].ActiveSessions < pods[j].ActiveSessions
 	})
-	return pods
+	return pods, nil
 }
 
 func (s *MemoryStore) CreateSession(_ context.Context, req model.CreateSessionRequest, heartbeatMaxAge time.Duration, lease time.Duration) (model.Session, error) {
