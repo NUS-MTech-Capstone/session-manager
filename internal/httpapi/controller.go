@@ -67,9 +67,23 @@ func (s *Server) sessionAction(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, session)
 	case "close":
-		session, err := s.svc.CloseSession(r.Context(), id)
+		var req model.CloseSessionRequest
+		if !decode(w, r, &req) {
+			return
+		}
+		if req.OwnerPodID == "" || req.OwnerInstanceID == "" {
+			writeError(w, http.StatusBadRequest, "ownerPodId and ownerInstanceId are required")
+			return
+		}
+		session, err := s.svc.CloseSession(r.Context(), id, req)
 		if err != nil {
-			writeError(w, http.StatusNotFound, "session not found")
+			status := http.StatusBadRequest
+			if errors.Is(err, store.ErrNotFound) {
+				status = http.StatusNotFound
+			} else if errors.Is(err, store.ErrSessionNotActive) {
+				status = http.StatusConflict
+			}
+			writeError(w, status, err.Error())
 			return
 		}
 		log.Printf("SessionClosed sessionId=%s", session.SessionID)

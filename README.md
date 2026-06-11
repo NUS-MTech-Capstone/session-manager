@@ -52,3 +52,16 @@ Sessions are assigned to the READY pod with the lowest `activeSessions`.
 Pods with heartbeat older than `HEARTBEAT_MAX_AGE_SECONDS` are ignored.
 Proxy Dataplane processes register themselves through `POST /proxy-pods/register`
 and refresh their records through `POST /proxy-pods/heartbeat`.
+
+Active sessions must heartbeat before `SESSION_LEASE_SECONDS` expires. Expired
+sessions are closed and their pod capacity is released when sessions or
+available pods are next accessed.
+
+Session heartbeat and close requests must include the assigned owner:
+
+```json
+{
+  "ownerPodId": "proxy-dataplane-abc",
+  "ownerInstanceId": "boot-uuid-123"
+}
+```

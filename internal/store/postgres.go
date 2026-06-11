@@ -128,6 +128,9 @@ func (s *PostgresStore) HeartbeatPod(ctx context.Context, pod model.ProxyPod) (m
 }
 
 func (s *PostgresStore) AvailablePods(ctx context.Context, maxAge time.Duration) ([]model.ProxyPod, error) {
+	if err := s.expireSessions(ctx, s.db, s.now().UTC()); err != nil {
+		return nil, err
+	}
 	const query = `
 SELECT pod_id, instance_id, pod_ip, websocket_url, status,
 	active_sessions, max_sessions, last_heartbeat_at
@@ -168,6 +171,10 @@ func (s *PostgresStore) CreateSession(
 		return model.Session{}, fmt.Errorf("begin session assignment: %w", err)
 	}
 	defer tx.Rollback()
+	now := s.now().UTC()
+	if err := s.expireSessions(ctx, tx, now); err != nil {
+		return model.Session{}, err
+	}
 
 	const selectPod = `
 SELECT pod_id, instance_id, pod_ip, websocket_url, status,
@@ -185,7 +192,7 @@ LIMIT 1
 		ctx,
 		selectPod,
 		model.PodStatusReady,
-		s.now().UTC().Add(-heartbeatMaxAge),
+		now.Add(-heartbeatMaxAge),
 	), &pod)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.Session{}, ErrNoAvailablePod
@@ -202,7 +209,6 @@ LIMIT 1
 		return model.Session{}, fmt.Errorf("reserve proxy pod: %w", err)
 	}
 
-	now := s.now().UTC()
 	id, err := sessionID()
 	if err != nil {
 		return model.Session{}, err
@@ -241,6 +247,9 @@ INSERT INTO sessions (
 }
 
 func (s *PostgresStore) GetSession(ctx context.Context, id string) (model.Session, error) {
+	if err := s.expireSessions(ctx, s.db, s.now().UTC()); err != nil {
+		return model.Session{}, err
+	}
 	const query = `
 SELECT session_id, user_id, host_id, cr_id, owner_pod_id, owner_instance_id,
 	websocket_url, status, created_at, last_heartbeat_at, lease_expires_at
@@ -265,6 +274,9 @@ func (s *PostgresStore) HeartbeatSession(
 	lease time.Duration,
 ) (model.Session, error) {
 	now := s.now().UTC()
+	if err := s.expireSessions(ctx, s.db, now); err != nil {
+		return model.Session{}, err
+	}
 	const query = `
 UPDATE sessions
 SET last_heartbeat_at = $1, lease_expires_at = $2
@@ -298,12 +310,15 @@ RETURNING session_id, user_id, host_id, cr_id, owner_pod_id, owner_instance_id,
 	return session, nil
 }
 
-func (s *PostgresStore) CloseSession(ctx context.Context, id string) (model.Session, error) {
+func (s *PostgresStore) CloseSession(ctx context.Context, id string, req model.CloseSessionRequest) (model.Session, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return model.Session{}, fmt.Errorf("begin close session: %w", err)
 	}
 	defer tx.Rollback()
+	if err := s.expireSessions(ctx, tx, s.now().UTC()); err != nil {
+		return model.Session{}, err
+	}
 
 	const selectSession = `
 SELECT session_id, user_id, host_id, cr_id, owner_pod_id, owner_instance_id,
@@ -319,6 +334,9 @@ FOR UPDATE
 	}
 	if err != nil {
 		return model.Session{}, fmt.Errorf("select session for close: %w", err)
+	}
+	if session.OwnerPodID != req.OwnerPodID || session.OwnerInstanceID != req.OwnerInstanceID {
+		return model.Session{}, errors.New("session owner mismatch")
 	}
 
 	if session.Status != model.SessionStatusClosed {
@@ -343,6 +361,35 @@ FOR UPDATE
 		return model.Session{}, fmt.Errorf("commit close session: %w", err)
 	}
 	return session, nil
+}
+
+type queryExecutor interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func (s *PostgresStore) expireSessions(ctx context.Context, executor queryExecutor, now time.Time) error {
+	const query = `
+	WITH expired AS (
+		UPDATE sessions
+		SET status = $1
+		WHERE status = $2
+			AND lease_expires_at <= $3
+		RETURNING owner_pod_id
+	),
+	released AS (
+		SELECT owner_pod_id, COUNT(*)::INTEGER AS session_count
+		FROM expired
+		GROUP BY owner_pod_id
+	)
+	UPDATE proxy_pods AS pod
+	SET active_sessions = GREATEST(pod.active_sessions - released.session_count, 0)
+	FROM released
+	WHERE pod.pod_id = released.owner_pod_id
+	`
+	if _, err := executor.ExecContext(ctx, query, model.SessionStatusClosed, model.SessionStatusActive, now); err != nil {
+		return fmt.Errorf("expire sessions: %w", err)
+	}
+	return nil
 }
 
 type rowScanner interface {

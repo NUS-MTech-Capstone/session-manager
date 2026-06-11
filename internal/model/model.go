@@ -43,3 +43,8 @@ type SessionHeartbeatRequest struct {
 	OwnerPodID      string `json:"ownerPodId"`
 	OwnerInstanceID string `json:"ownerInstanceId"`
 }
+
+type CloseSessionRequest struct {
+	OwnerPodID      string `json:"ownerPodId"`
+	OwnerInstanceID string `json:"ownerInstanceId"`
+}

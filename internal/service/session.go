@@ -18,6 +18,6 @@ func (s *Service) HeartbeatSession(ctx context.Context, id string, req model.Ses
 	return s.store.HeartbeatSession(ctx, id, req, s.leaseDuration)
 }
 
-func (s *Service) CloseSession(ctx context.Context, id string) (model.Session, error) {
-	return s.store.CloseSession(ctx, id)
+func (s *Service) CloseSession(ctx context.Context, id string, req model.CloseSessionRequest) (model.Session, error) {
+	return s.store.CloseSession(ctx, id, req)
 }

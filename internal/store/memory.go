@@ -58,8 +58,9 @@ func (s *MemoryStore) HeartbeatPod(ctx context.Context, pod model.ProxyPod) (mod
 }
 
 func (s *MemoryStore) AvailablePods(_ context.Context, maxAge time.Duration) ([]model.ProxyPod, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.expireSessionsLocked()
 	cutoff := s.now().Add(-maxAge)
 	var pods []model.ProxyPod
 	for _, pod := range s.pods {
@@ -79,6 +80,7 @@ func (s *MemoryStore) AvailablePods(_ context.Context, maxAge time.Duration) ([]
 func (s *MemoryStore) CreateSession(_ context.Context, req model.CreateSessionRequest, heartbeatMaxAge time.Duration, lease time.Duration) (model.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.expireSessionsLocked()
 	now := s.now().UTC()
 	cutoff := now.Add(-heartbeatMaxAge)
 	var chosen *model.ProxyPod
@@ -116,8 +118,9 @@ func (s *MemoryStore) CreateSession(_ context.Context, req model.CreateSessionRe
 }
 
 func (s *MemoryStore) GetSession(_ context.Context, id string) (model.Session, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.expireSessionsLocked()
 	session, ok := s.sessions[id]
 	if !ok {
 		return model.Session{}, ErrNotFound
@@ -139,26 +142,47 @@ func (s *MemoryStore) HeartbeatSession(_ context.Context, id string, req model.S
 		return model.Session{}, ErrSessionNotActive
 	}
 	now := s.now().UTC()
+	if !session.LeaseExpiresAt.After(now) {
+		s.closeSessionLocked(session)
+		return model.Session{}, ErrSessionNotActive
+	}
 	session.LastHeartbeatAt = now
 	session.LeaseExpiresAt = now.Add(lease)
 	s.sessions[id] = session
 	return session, nil
 }
 
-func (s *MemoryStore) CloseSession(_ context.Context, id string) (model.Session, error) {
+func (s *MemoryStore) CloseSession(_ context.Context, id string, req model.CloseSessionRequest) (model.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.expireSessionsLocked()
 	session, ok := s.sessions[id]
 	if !ok {
 		return model.Session{}, ErrNotFound
 	}
+	if session.OwnerPodID != req.OwnerPodID || session.OwnerInstanceID != req.OwnerInstanceID {
+		return model.Session{}, errors.New("session owner mismatch")
+	}
+	return s.closeSessionLocked(session), nil
+}
+
+func (s *MemoryStore) expireSessionsLocked() {
+	now := s.now().UTC()
+	for _, session := range s.sessions {
+		if session.Status == model.SessionStatusActive && !session.LeaseExpiresAt.After(now) {
+			s.closeSessionLocked(session)
+		}
+	}
+}
+
+func (s *MemoryStore) closeSessionLocked(session model.Session) model.Session {
 	if session.Status != model.SessionStatusClosed {
 		session.Status = model.SessionStatusClosed
 		if pod, ok := s.pods[session.OwnerPodID]; ok && pod.ActiveSessions > 0 {
 			pod.ActiveSessions--
 			s.pods[pod.PodID] = pod
 		}
+		s.sessions[session.SessionID] = session
 	}
-	s.sessions[id] = session
-	return session, nil
+	return session
 }

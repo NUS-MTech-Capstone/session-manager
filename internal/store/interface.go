@@ -14,5 +14,5 @@ type Store interface {
 	CreateSession(context.Context, model.CreateSessionRequest, time.Duration, time.Duration) (model.Session, error)
 	GetSession(context.Context, string) (model.Session, error)
 	HeartbeatSession(context.Context, string, model.SessionHeartbeatRequest, time.Duration) (model.Session, error)
-	CloseSession(context.Context, string) (model.Session, error)
+	CloseSession(context.Context, string, model.CloseSessionRequest) (model.Session, error)
 }
