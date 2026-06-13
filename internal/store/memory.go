@@ -100,11 +100,15 @@ func (s *MemoryStore) CreateSession(_ context.Context, req model.CreateSessionRe
 	s.pods[chosen.PodID] = *chosen
 
 	id := fmt.Sprintf("sess-%d", now.UnixNano())
+	if req.ConnectionType == "" {
+		req.ConnectionType = "ssh"
+	}
 	session := model.Session{
 		SessionID:       id,
 		UserID:          req.UserID,
 		HostID:          req.HostID,
 		CRID:            req.CRID,
+		ConnectionType:  req.ConnectionType,
 		OwnerPodID:      chosen.PodID,
 		OwnerInstanceID: chosen.InstanceID,
 		WebsocketURL:    fmt.Sprintf("%s/sessions/%s/ws", chosen.WebsocketURL, id),

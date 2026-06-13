@@ -64,6 +64,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 	user_id TEXT NOT NULL,
 	host_id TEXT NOT NULL,
 	cr_id TEXT NOT NULL,
+	connection_type TEXT NOT NULL DEFAULT 'ssh',
 	owner_pod_id TEXT NOT NULL,
 	owner_instance_id TEXT NOT NULL,
 	websocket_url TEXT NOT NULL,
@@ -75,6 +76,9 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 CREATE INDEX IF NOT EXISTS proxy_pods_assignment_idx
 	ON proxy_pods (status, active_sessions, pod_id);
+
+ALTER TABLE sessions
+	ADD COLUMN IF NOT EXISTS connection_type TEXT NOT NULL DEFAULT 'ssh';
 `
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("migrate postgres store: %w", err)
@@ -213,11 +217,15 @@ LIMIT 1
 	if err != nil {
 		return model.Session{}, err
 	}
+	if req.ConnectionType == "" {
+		req.ConnectionType = "ssh"
+	}
 	session := model.Session{
 		SessionID:       id,
 		UserID:          req.UserID,
 		HostID:          req.HostID,
 		CRID:            req.CRID,
+		ConnectionType:  req.ConnectionType,
 		OwnerPodID:      pod.PodID,
 		OwnerInstanceID: pod.InstanceID,
 		WebsocketURL:    fmt.Sprintf("%s/sessions/%s/ws", pod.WebsocketURL, id),
@@ -229,12 +237,12 @@ LIMIT 1
 
 	const insertSession = `
 INSERT INTO sessions (
-	session_id, user_id, host_id, cr_id, owner_pod_id, owner_instance_id,
+	session_id, user_id, host_id, cr_id, connection_type, owner_pod_id, owner_instance_id,
 	websocket_url, status, created_at, last_heartbeat_at, lease_expires_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 `
 	if _, err := tx.ExecContext(ctx, insertSession,
-		session.SessionID, session.UserID, session.HostID, session.CRID,
+		session.SessionID, session.UserID, session.HostID, session.CRID, session.ConnectionType,
 		session.OwnerPodID, session.OwnerInstanceID, session.WebsocketURL,
 		session.Status, session.CreatedAt, session.LastHeartbeatAt, session.LeaseExpiresAt,
 	); err != nil {
@@ -251,7 +259,7 @@ func (s *PostgresStore) GetSession(ctx context.Context, id string) (model.Sessio
 		return model.Session{}, err
 	}
 	const query = `
-SELECT session_id, user_id, host_id, cr_id, owner_pod_id, owner_instance_id,
+SELECT session_id, user_id, host_id, cr_id, connection_type, owner_pod_id, owner_instance_id,
 	websocket_url, status, created_at, last_heartbeat_at, lease_expires_at
 FROM sessions
 WHERE session_id = $1
@@ -284,7 +292,7 @@ WHERE session_id = $3
 	AND owner_pod_id = $4
 	AND owner_instance_id = $5
 	AND status = $6
-RETURNING session_id, user_id, host_id, cr_id, owner_pod_id, owner_instance_id,
+RETURNING session_id, user_id, host_id, cr_id, connection_type, owner_pod_id, owner_instance_id,
 	websocket_url, status, created_at, last_heartbeat_at, lease_expires_at
 `
 	var session model.Session
@@ -321,7 +329,7 @@ func (s *PostgresStore) CloseSession(ctx context.Context, id string, req model.C
 	}
 
 	const selectSession = `
-SELECT session_id, user_id, host_id, cr_id, owner_pod_id, owner_instance_id,
+SELECT session_id, user_id, host_id, cr_id, connection_type, owner_pod_id, owner_instance_id,
 	websocket_url, status, created_at, last_heartbeat_at, lease_expires_at
 FROM sessions
 WHERE session_id = $1
@@ -415,6 +423,7 @@ func scanSession(row rowScanner, session *model.Session) error {
 		&session.UserID,
 		&session.HostID,
 		&session.CRID,
+		&session.ConnectionType,
 		&session.OwnerPodID,
 		&session.OwnerInstanceID,
 		&session.WebsocketURL,

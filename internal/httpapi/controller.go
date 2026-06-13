@@ -19,6 +19,13 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "userId, hostId and crId are required")
 		return
 	}
+	if req.ConnectionType == "" {
+		req.ConnectionType = "ssh"
+	}
+	if req.ConnectionType != "ssh" {
+		writeError(w, http.StatusBadRequest, "only ssh connectionType is supported")
+		return
+	}
 	session, err := s.svc.CreateSession(r.Context(), req)
 	if err != nil {
 		status := http.StatusInternalServerError

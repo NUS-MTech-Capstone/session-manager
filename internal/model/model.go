@@ -13,6 +13,7 @@ type Session struct {
 	UserID          string    `json:"userId"`
 	HostID          string    `json:"hostId"`
 	CRID            string    `json:"crId"`
+	ConnectionType  string    `json:"connectionType"`
 	OwnerPodID      string    `json:"ownerPodId"`
 	OwnerInstanceID string    `json:"ownerInstanceId"`
 	WebsocketURL    string    `json:"websocketUrl"`
@@ -34,9 +35,10 @@ type ProxyPod struct {
 }
 
 type CreateSessionRequest struct {
-	UserID string `json:"userId"`
-	HostID string `json:"hostId"`
-	CRID   string `json:"crId"`
+	UserID         string `json:"userId"`
+	HostID         string `json:"hostId"`
+	CRID           string `json:"crId"`
+	ConnectionType string `json:"connectionType"`
 }
 
 type SessionHeartbeatRequest struct {

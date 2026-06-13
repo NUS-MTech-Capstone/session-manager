@@ -29,7 +29,9 @@ func TestPostgresStorePersistsSessionAcrossConnections(t *testing.T) {
 
 	session, err := st.CreateSession(
 		ctx,
-		model.CreateSessionRequest{UserID: "user-1", HostID: "host-1", CRID: "cr-1"},
+		model.CreateSessionRequest{
+			UserID: "user-1", HostID: "host-1", CRID: "cr-1", ConnectionType: "ssh",
+		},
 		15*time.Second,
 		time.Minute,
 	)
@@ -55,6 +57,9 @@ func TestPostgresStorePersistsSessionAcrossConnections(t *testing.T) {
 	}
 	if stored.SessionID != session.SessionID || stored.WebsocketURL != session.WebsocketURL {
 		t.Fatalf("stored session = %#v, want sessionId=%q websocketUrl=%q", stored, session.SessionID, session.WebsocketURL)
+	}
+	if stored.ConnectionType != "ssh" {
+		t.Fatalf("ConnectionType = %q, want ssh", stored.ConnectionType)
 	}
 
 	closed, err := reopened.CloseSession(ctx, session.SessionID, model.CloseSessionRequest{

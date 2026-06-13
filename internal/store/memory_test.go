@@ -21,6 +21,9 @@ func TestCreateSessionChoosesReadyPodWithLowestActiveSessions(t *testing.T) {
 	if session.OwnerPodID != "a" || session.OwnerInstanceID != "i-a" {
 		t.Fatalf("owner = %s/%s, want a/i-a", session.OwnerPodID, session.OwnerInstanceID)
 	}
+	if session.ConnectionType != "ssh" {
+		t.Fatalf("ConnectionType = %q, want ssh default", session.ConnectionType)
+	}
 }
 
 func TestAvailablePodsReturnsHealthyPodsByLoad(t *testing.T) {

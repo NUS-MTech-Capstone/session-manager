@@ -57,6 +57,9 @@ Active sessions must heartbeat before `SESSION_LEASE_SECONDS` expires. Expired
 sessions are closed and their pod capacity is released when sessions or
 available pods are next accessed.
 
+Session records persist `connectionType`; it defaults to `ssh` for compatibility
+with existing callers and PostgreSQL rows.
+
 Session heartbeat and close requests must include the assigned owner:
 
 ```json
