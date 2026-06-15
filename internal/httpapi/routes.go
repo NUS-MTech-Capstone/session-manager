@@ -12,4 +12,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /proxy-pods/register", s.registerPod)
 	s.mux.HandleFunc("POST /proxy-pods/heartbeat", s.heartbeatPod)
 	s.mux.HandleFunc("GET /proxy-pods/available", s.availablePods)
+	s.mux.HandleFunc("POST /automation/runs", s.createAutomationRun)
+	s.mux.HandleFunc("GET /automation/runs/", s.getAutomationRun)
+	s.mux.HandleFunc("POST /automation/runs/", s.automationRunAction)
 }

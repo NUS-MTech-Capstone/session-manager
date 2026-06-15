@@ -15,4 +15,7 @@ type Store interface {
 	GetSession(context.Context, string) (model.Session, error)
 	HeartbeatSession(context.Context, string, model.SessionHeartbeatRequest, time.Duration) (model.Session, error)
 	CloseSession(context.Context, string, model.CloseSessionRequest) (model.Session, error)
+	CreateAutomationRun(context.Context, model.CreateAutomationRunRequest, time.Duration, time.Duration) (model.AutomationRun, error)
+	GetAutomationRun(context.Context, string) (model.AutomationRun, error)
+	CloseAutomationRun(context.Context, string) (model.AutomationRun, error)
 }

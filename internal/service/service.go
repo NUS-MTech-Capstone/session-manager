@@ -7,11 +7,19 @@ import (
 )
 
 type Service struct {
-	store           store.Store
-	heartbeatMaxAge time.Duration
-	leaseDuration   time.Duration
+	store            store.Store
+	heartbeatMaxAge  time.Duration
+	leaseDuration    time.Duration
+	automationRunTTL time.Duration
 }
 
-func New(store store.Store, heartbeatMaxAge, leaseDuration time.Duration) *Service {
-	return &Service{store: store, heartbeatMaxAge: heartbeatMaxAge, leaseDuration: leaseDuration}
+func New(store store.Store, heartbeatMaxAge, leaseDuration time.Duration, automationRunTTL ...time.Duration) *Service {
+	runTTL := time.Hour
+	if len(automationRunTTL) > 0 && automationRunTTL[0] > 0 {
+		runTTL = automationRunTTL[0]
+	}
+	return &Service{
+		store: store, heartbeatMaxAge: heartbeatMaxAge,
+		leaseDuration: leaseDuration, automationRunTTL: runTTL,
+	}
 }

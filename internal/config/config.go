@@ -7,20 +7,22 @@ import (
 )
 
 type Config struct {
-	Port            string
-	StoreDriver     string
-	DatabaseURL     string
-	HeartbeatMaxAge time.Duration
-	LeaseDuration   time.Duration
+	Port             string
+	StoreDriver      string
+	DatabaseURL      string
+	HeartbeatMaxAge  time.Duration
+	LeaseDuration    time.Duration
+	AutomationRunTTL time.Duration
 }
 
 func Load() Config {
 	return Config{
-		Port:            env("PORT", "8081"),
-		StoreDriver:     env("STORE_DRIVER", "memory"),
-		DatabaseURL:     os.Getenv("DATABASE_URL"),
-		HeartbeatMaxAge: secondsEnv("HEARTBEAT_MAX_AGE_SECONDS", 15),
-		LeaseDuration:   secondsEnv("SESSION_LEASE_SECONDS", 60),
+		Port:             env("PORT", "8081"),
+		StoreDriver:      env("STORE_DRIVER", "memory"),
+		DatabaseURL:      os.Getenv("DATABASE_URL"),
+		HeartbeatMaxAge:  secondsEnv("HEARTBEAT_MAX_AGE_SECONDS", 15),
+		LeaseDuration:    secondsEnv("SESSION_LEASE_SECONDS", 60),
+		AutomationRunTTL: secondsEnv("AUTOMATION_RUN_TTL_SECONDS", 3600),
 	}
 }
 

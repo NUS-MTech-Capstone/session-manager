@@ -199,13 +199,47 @@ func TestPostgresStoreRejectsCloseOwnerMismatch(t *testing.T) {
 	}
 }
 
+func TestPostgresStorePersistsAutomationRunOwnership(t *testing.T) {
+	databaseURL := os.Getenv("TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_DATABASE_URL is not set")
+	}
+
+	ctx := context.Background()
+	st := newTestPostgresStore(t, ctx, databaseURL)
+	pod, err := st.RegisterPod(ctx, model.ProxyPod{
+		PodID: "pod-automation", InstanceID: "instance-automation",
+		WebsocketURL: "ws://proxy", OperationsURL: "http://proxy:8083", MaxSessions: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := st.CreateAutomationRun(ctx, model.CreateAutomationRunRequest{
+		IncidentID: "incident-1", HostID: "host-1",
+	}, 15*time.Second, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.OwnerPodID != pod.PodID || run.OwnerInstanceID != pod.InstanceID ||
+		run.OperationsURL != pod.OperationsURL {
+		t.Fatalf("automation run = %#v", run)
+	}
+	stored, err := st.GetAutomationRun(ctx, run.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.OwnerInstanceID != "instance-automation" {
+		t.Fatalf("stored automation run = %#v", stored)
+	}
+}
+
 func newTestPostgresStore(t *testing.T, ctx context.Context, databaseURL string) *PostgresStore {
 	t.Helper()
 	st, err := NewPostgresStore(ctx, databaseURL)
 	if err != nil {
 		t.Fatalf("NewPostgresStore() error = %v", err)
 	}
-	if _, err := st.db.ExecContext(ctx, `TRUNCATE sessions, proxy_pods`); err != nil {
+	if _, err := st.db.ExecContext(ctx, `TRUNCATE automation_runs, sessions, proxy_pods`); err != nil {
 		_ = st.Close()
 		t.Fatalf("truncate test tables: %v", err)
 	}

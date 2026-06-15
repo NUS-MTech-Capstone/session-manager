@@ -21,3 +21,15 @@ func (s *Service) HeartbeatSession(ctx context.Context, id string, req model.Ses
 func (s *Service) CloseSession(ctx context.Context, id string, req model.CloseSessionRequest) (model.Session, error) {
 	return s.store.CloseSession(ctx, id, req)
 }
+
+func (s *Service) CreateAutomationRun(ctx context.Context, req model.CreateAutomationRunRequest) (model.AutomationRun, error) {
+	return s.store.CreateAutomationRun(ctx, req, s.heartbeatMaxAge, s.automationRunTTL)
+}
+
+func (s *Service) GetAutomationRun(ctx context.Context, id string) (model.AutomationRun, error) {
+	return s.store.GetAutomationRun(ctx, id)
+}
+
+func (s *Service) CloseAutomationRun(ctx context.Context, id string) (model.AutomationRun, error) {
+	return s.store.CloseAutomationRun(ctx, id)
+}

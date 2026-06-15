@@ -5,6 +5,8 @@ import "time"
 const (
 	SessionStatusActive = "ACTIVE"
 	SessionStatusClosed = "CLOSED"
+	AutomationRunActive = "ACTIVE"
+	AutomationRunClosed = "CLOSED"
 	PodStatusReady      = "READY"
 )
 
@@ -28,10 +30,28 @@ type ProxyPod struct {
 	InstanceID      string    `json:"instanceId"`
 	PodIP           string    `json:"podIp"`
 	WebsocketURL    string    `json:"websocketUrl"`
+	OperationsURL   string    `json:"operationsUrl"`
 	Status          string    `json:"status"`
 	ActiveSessions  int       `json:"activeSessions"`
 	MaxSessions     int       `json:"maxSessions"`
 	LastHeartbeatAt time.Time `json:"lastHeartbeatAt"`
+}
+
+type AutomationRun struct {
+	RunID           string    `json:"runId"`
+	IncidentID      string    `json:"incidentId"`
+	HostID          string    `json:"hostId"`
+	OwnerPodID      string    `json:"ownerPodId"`
+	OwnerInstanceID string    `json:"ownerInstanceId"`
+	OperationsURL   string    `json:"operationsUrl"`
+	Status          string    `json:"status"`
+	CreatedAt       time.Time `json:"createdAt"`
+	ExpiresAt       time.Time `json:"expiresAt"`
+}
+
+type CreateAutomationRunRequest struct {
+	IncidentID string `json:"incidentId"`
+	HostID     string `json:"hostId"`
 }
 
 type CreateSessionRequest struct {

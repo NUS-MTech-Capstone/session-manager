@@ -46,6 +46,9 @@ POST /sessions/{sessionId}/close
 POST /proxy-pods/register
 POST /proxy-pods/heartbeat
 GET  /proxy-pods/available
+POST /automation/runs
+GET  /automation/runs/{runId}
+POST /automation/runs/{runId}/close
 ```
 
 Sessions are assigned to the READY pod with the lowest `activeSessions`.
@@ -59,6 +62,11 @@ available pods are next accessed.
 
 Session records persist `connectionType`; it defaults to `ssh` for compatibility
 with existing callers and PostgreSQL rows.
+
+Proxy pod registration includes `operationsUrl` for internal automation calls.
+Automation runs retain `ownerPodId + ownerInstanceId`, expire after
+`AUTOMATION_RUN_TTL_SECONDS` (default `3600`), and do not reserve interactive
+session capacity while a plan waits for approval.
 
 Session heartbeat and close requests must include the assigned owner:
 

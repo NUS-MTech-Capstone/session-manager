@@ -21,7 +21,7 @@ func main() {
 	}
 	defer closeStore()
 
-	svc := service.New(st, cfg.HeartbeatMaxAge, cfg.LeaseDuration)
+	svc := service.New(st, cfg.HeartbeatMaxAge, cfg.LeaseDuration, cfg.AutomationRunTTL)
 	addr := ":" + cfg.Port
 	log.Printf("session-manager listening on %s store=%s", addr, cfg.StoreDriver)
 	log.Fatal(http.ListenAndServe(addr, httpapi.New(svc)))

@@ -18,20 +18,76 @@ var (
 )
 
 type MemoryStore struct {
-	mu       sync.RWMutex
-	sessions map[string]model.Session
-	pods     map[string]model.ProxyPod
-	now      func() time.Time
+	mu             sync.RWMutex
+	sessions       map[string]model.Session
+	automationRuns map[string]model.AutomationRun
+	pods           map[string]model.ProxyPod
+	now            func() time.Time
 }
 
 var _ Store = (*MemoryStore)(nil)
 
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		sessions: make(map[string]model.Session),
-		pods:     make(map[string]model.ProxyPod),
-		now:      time.Now,
+		sessions:       make(map[string]model.Session),
+		automationRuns: make(map[string]model.AutomationRun),
+		pods:           make(map[string]model.ProxyPod),
+		now:            time.Now,
 	}
+}
+
+func (s *MemoryStore) CreateAutomationRun(_ context.Context, req model.CreateAutomationRunRequest, heartbeatMaxAge, ttl time.Duration) (model.AutomationRun, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.now().UTC()
+	cutoff := now.Add(-heartbeatMaxAge)
+	var chosen *model.ProxyPod
+	for _, pod := range s.pods {
+		pod := pod
+		if pod.Status != model.PodStatusReady || pod.OperationsURL == "" || !pod.LastHeartbeatAt.After(cutoff) {
+			continue
+		}
+		if chosen == nil || pod.ActiveSessions < chosen.ActiveSessions || pod.ActiveSessions == chosen.ActiveSessions && pod.PodID < chosen.PodID {
+			chosen = &pod
+		}
+	}
+	if chosen == nil {
+		return model.AutomationRun{}, ErrNoAvailablePod
+	}
+	run := model.AutomationRun{
+		RunID: fmt.Sprintf("run-%d", now.UnixNano()), IncidentID: req.IncidentID, HostID: req.HostID,
+		OwnerPodID: chosen.PodID, OwnerInstanceID: chosen.InstanceID,
+		OperationsURL: chosen.OperationsURL, Status: model.AutomationRunActive,
+		CreatedAt: now, ExpiresAt: now.Add(ttl),
+	}
+	s.automationRuns[run.RunID] = run
+	return run, nil
+}
+
+func (s *MemoryStore) GetAutomationRun(_ context.Context, id string) (model.AutomationRun, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run, ok := s.automationRuns[id]
+	if !ok {
+		return model.AutomationRun{}, ErrNotFound
+	}
+	if run.Status == model.AutomationRunActive && !run.ExpiresAt.After(s.now().UTC()) {
+		run.Status = model.AutomationRunClosed
+		s.automationRuns[id] = run
+	}
+	return run, nil
+}
+
+func (s *MemoryStore) CloseAutomationRun(_ context.Context, id string) (model.AutomationRun, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run, ok := s.automationRuns[id]
+	if !ok {
+		return model.AutomationRun{}, ErrNotFound
+	}
+	run.Status = model.AutomationRunClosed
+	s.automationRuns[id] = run
+	return run, nil
 }
 
 func (s *MemoryStore) RegisterPod(_ context.Context, pod model.ProxyPod) (model.ProxyPod, error) {

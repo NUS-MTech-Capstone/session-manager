@@ -105,8 +105,8 @@ func (s *Server) registerPod(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &pod) {
 		return
 	}
-	if pod.PodID == "" || pod.InstanceID == "" || pod.WebsocketURL == "" {
-		writeError(w, http.StatusBadRequest, "podId, instanceId and websocketUrl are required")
+	if pod.PodID == "" || pod.InstanceID == "" || pod.WebsocketURL == "" || pod.OperationsURL == "" {
+		writeError(w, http.StatusBadRequest, "podId, instanceId, websocketUrl and operationsUrl are required")
 		return
 	}
 	registered, err := s.svc.RegisterPod(r.Context(), pod)
@@ -122,8 +122,8 @@ func (s *Server) heartbeatPod(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &pod) {
 		return
 	}
-	if pod.PodID == "" || pod.InstanceID == "" || pod.WebsocketURL == "" {
-		writeError(w, http.StatusBadRequest, "podId, instanceId and websocketUrl are required")
+	if pod.PodID == "" || pod.InstanceID == "" || pod.WebsocketURL == "" || pod.OperationsURL == "" {
+		writeError(w, http.StatusBadRequest, "podId, instanceId, websocketUrl and operationsUrl are required")
 		return
 	}
 	heartbeat, err := s.svc.HeartbeatPod(r.Context(), pod)
@@ -132,6 +132,61 @@ func (s *Server) heartbeatPod(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, heartbeat)
+}
+
+func (s *Server) createAutomationRun(w http.ResponseWriter, r *http.Request) {
+	var req model.CreateAutomationRunRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	if req.IncidentID == "" || req.HostID == "" {
+		writeError(w, http.StatusBadRequest, "incidentId and hostId are required")
+		return
+	}
+	run, err := s.svc.CreateAutomationRun(r.Context(), req)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, store.ErrNoAvailablePod) {
+			status = http.StatusServiceUnavailable
+		}
+		writeError(w, status, err.Error())
+		return
+	}
+	log.Printf("AutomationRunCreated runId=%s incidentId=%s ownerPodId=%s", run.RunID, run.IncidentID, run.OwnerPodID)
+	writeJSON(w, http.StatusCreated, run)
+}
+
+func (s *Server) getAutomationRun(w http.ResponseWriter, r *http.Request) {
+	id, action := parseAutomationRunPath(r.URL.Path)
+	if id == "" || action != "" {
+		http.NotFound(w, r)
+		return
+	}
+	run, err := s.svc.GetAutomationRun(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "automation run not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, run)
+}
+
+func (s *Server) automationRunAction(w http.ResponseWriter, r *http.Request) {
+	id, action := parseAutomationRunPath(r.URL.Path)
+	if id == "" || action != "close" {
+		http.NotFound(w, r)
+		return
+	}
+	run, err := s.svc.CloseAutomationRun(r.Context(), id)
+	if err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, store.ErrNotFound) {
+			status = http.StatusNotFound
+		}
+		writeError(w, status, err.Error())
+		return
+	}
+	log.Printf("AutomationRunClosed runId=%s incidentId=%s", run.RunID, run.IncidentID)
+	writeJSON(w, http.StatusOK, run)
 }
 
 func (s *Server) availablePods(w http.ResponseWriter, r *http.Request) {
@@ -152,4 +207,15 @@ func parseSessionPath(path string) (string, string) {
 		return parts[1], ""
 	}
 	return parts[1], parts[2]
+}
+
+func parseAutomationRunPath(path string) (string, string) {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) < 3 || parts[0] != "automation" || parts[1] != "runs" {
+		return "", ""
+	}
+	if len(parts) == 3 {
+		return parts[2], ""
+	}
+	return parts[2], parts[3]
 }

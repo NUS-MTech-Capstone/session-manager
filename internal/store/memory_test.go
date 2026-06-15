@@ -264,3 +264,31 @@ func TestCloseSessionRejectsOwnerMismatch(t *testing.T) {
 		t.Fatalf("status = %q, want %q", stored.Status, model.SessionStatusActive)
 	}
 }
+
+func TestAutomationRunUsesOperationsURLAndOwnerInstance(t *testing.T) {
+	st := NewMemoryStore()
+	now := time.Now().UTC()
+	st.now = func() time.Time { return now }
+	_, _ = st.RegisterPod(t.Context(), model.ProxyPod{
+		PodID: "pod", InstanceID: "instance-1", WebsocketURL: "ws://proxy",
+		OperationsURL: "http://10.0.0.10:8083", MaxSessions: 50,
+	})
+	run, err := st.CreateAutomationRun(t.Context(), model.CreateAutomationRunRequest{
+		IncidentID: "inc-1", HostID: "host-1",
+	}, 15*time.Second, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.OwnerPodID != "pod" || run.OwnerInstanceID != "instance-1" ||
+		run.OperationsURL != "http://10.0.0.10:8083" {
+		t.Fatalf("run = %#v", run)
+	}
+	now = now.Add(time.Hour)
+	expired, err := st.GetAutomationRun(t.Context(), run.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if expired.Status != model.AutomationRunClosed {
+		t.Fatalf("status = %s", expired.Status)
+	}
+}
