@@ -1,9 +1,9 @@
 package httpapi
 
 import (
-	"log"
 	"net/http"
 
+	"github.com/NUS-MTech-Capstone/session-manager/internal/observability"
 	"github.com/NUS-MTech-Capstone/session-manager/internal/service"
 )
 
@@ -19,6 +19,5 @@ func New(svc *service.Service) *Server {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	log.Printf("%s %s", r.Method, r.URL.Path)
-	s.mux.ServeHTTP(w, r)
+	observability.RequestIDMiddleware(observability.LogRequests(s.mux)).ServeHTTP(w, r)
 }

@@ -2,11 +2,12 @@ package httpapi
 
 import (
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/NUS-MTech-Capstone/session-manager/internal/model"
+	"github.com/NUS-MTech-Capstone/session-manager/internal/observability"
 	"github.com/NUS-MTech-Capstone/session-manager/internal/store"
 )
 
@@ -35,7 +36,17 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, err.Error())
 		return
 	}
-	log.Printf("SessionCreated sessionId=%s ownerPodId=%s", session.SessionID, session.OwnerPodID)
+	slog.InfoContext(r.Context(), "SessionCreated",
+		"requestId", observability.RequestID(r.Context()),
+		"sessionId", session.SessionID,
+		"userId", session.UserID,
+		"hostId", session.HostID,
+		"crId", session.CRID,
+		"podId", session.OwnerPodID,
+		"instanceId", session.OwnerInstanceID,
+		"action", "start",
+		"mode", "owner",
+	)
 	writeJSON(w, http.StatusCreated, session)
 }
 
@@ -93,7 +104,15 @@ func (s *Server) sessionAction(w http.ResponseWriter, r *http.Request) {
 			writeError(w, status, err.Error())
 			return
 		}
-		log.Printf("SessionClosed sessionId=%s", session.SessionID)
+		slog.InfoContext(r.Context(), "SessionClosed",
+			"requestId", observability.RequestID(r.Context()),
+			"sessionId", session.SessionID,
+			"userId", session.UserID,
+			"hostId", session.HostID,
+			"crId", session.CRID,
+			"podId", session.OwnerPodID,
+			"instanceId", session.OwnerInstanceID,
+		)
 		writeJSON(w, http.StatusOK, session)
 	default:
 		http.NotFound(w, r)
@@ -152,7 +171,14 @@ func (s *Server) createAutomationRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, err.Error())
 		return
 	}
-	log.Printf("AutomationRunCreated runId=%s incidentId=%s ownerPodId=%s", run.RunID, run.IncidentID, run.OwnerPodID)
+	slog.InfoContext(r.Context(), "AutomationRunCreated",
+		"requestId", observability.RequestID(r.Context()),
+		"runId", run.RunID,
+		"incidentId", run.IncidentID,
+		"hostId", run.HostID,
+		"podId", run.OwnerPodID,
+		"instanceId", run.OwnerInstanceID,
+	)
 	writeJSON(w, http.StatusCreated, run)
 }
 
@@ -185,7 +211,11 @@ func (s *Server) automationRunAction(w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, err.Error())
 		return
 	}
-	log.Printf("AutomationRunClosed runId=%s incidentId=%s", run.RunID, run.IncidentID)
+	slog.InfoContext(r.Context(), "AutomationRunClosed",
+		"requestId", observability.RequestID(r.Context()),
+		"runId", run.RunID,
+		"incidentId", run.IncidentID,
+	)
 	writeJSON(w, http.StatusOK, run)
 }
 
