@@ -82,3 +82,12 @@ Session heartbeat and close requests must include the assigned owner:
   "ownerInstanceId": "boot-uuid-123"
 }
 ```
+
+## API Specification
+
+The OpenAPI contract is checked in at `api/openapi.yaml` and is served
+unauthenticated at:
+
+```http
+GET /openapi.yaml
+```

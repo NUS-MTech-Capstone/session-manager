@@ -1,11 +1,16 @@
 package httpapi
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/NUS-MTech-Capstone/session-manager/api"
+)
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+	s.mux.HandleFunc("GET /openapi.yaml", serveYAML(api.OpenAPI))
 	s.mux.HandleFunc("POST /sessions", s.createSession)
 	s.mux.HandleFunc("GET /sessions", s.listSessions)
 	s.mux.HandleFunc("GET /sessions/", s.getSession)

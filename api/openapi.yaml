@@ -1,0 +1,384 @@
+openapi: 3.1.0
+info:
+  title: DenDenMushi Session Manager API
+  version: 0.1.0
+  description: Internal session registry, proxy pod assignment, lease, and automation run API.
+servers:
+  - url: http://localhost:8082
+paths:
+  /healthz:
+    get:
+      summary: Liveness probe
+      responses:
+        "200":
+          $ref: "#/components/responses/Health"
+  /sessions:
+    post:
+      summary: Create and assign a new session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSessionRequest"
+      responses:
+        "201":
+          description: Session assigned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "400":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+    get:
+      summary: List sessions by owner, host, change request, and status
+      parameters:
+        - name: userId
+          in: query
+          schema:
+            type: string
+        - name: hostId
+          in: query
+          schema:
+            type: string
+        - name: crId
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [ACTIVE, CLOSED]
+      responses:
+        "200":
+          description: Matching sessions.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListSessionsResponse"
+  /sessions/{sessionId}:
+    get:
+      summary: Get session metadata
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Session metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "404":
+          $ref: "#/components/responses/Error"
+  /sessions/{sessionId}/heartbeat:
+    post:
+      summary: Refresh a session lease for the owning dataplane process
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OwnerInstanceRequest"
+      responses:
+        "200":
+          description: Session lease refreshed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "400":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /sessions/{sessionId}/close:
+    post:
+      summary: Close a session and release capacity
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OwnerInstanceRequest"
+      responses:
+        "200":
+          description: Session closed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "400":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+  /proxy-pods/register:
+    post:
+      summary: Register a proxy dataplane process
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProxyPod"
+      responses:
+        "201":
+          description: Pod registered.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProxyPod"
+        "400":
+          $ref: "#/components/responses/Error"
+  /proxy-pods/heartbeat:
+    post:
+      summary: Refresh proxy dataplane health and capacity metadata
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProxyPod"
+      responses:
+        "200":
+          description: Pod heartbeat recorded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProxyPod"
+        "400":
+          $ref: "#/components/responses/Error"
+  /proxy-pods/available:
+    get:
+      summary: List healthy READY proxy dataplane pods
+      responses:
+        "200":
+          description: Available pods.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProxyPod"
+  /automation/runs:
+    post:
+      summary: Create and assign an automation run
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAutomationRunRequest"
+      responses:
+        "201":
+          description: Run assigned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutomationRun"
+        "400":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+  /automation/runs/{runId}:
+    get:
+      summary: Get automation run metadata
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Automation run.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutomationRun"
+        "404":
+          $ref: "#/components/responses/Error"
+  /automation/runs/{runId}/close:
+    post:
+      summary: Close an automation run
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Closed automation run.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutomationRun"
+        "400":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+components:
+  parameters:
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+    RunId:
+      name: runId
+      in: path
+      required: true
+      schema:
+        type: string
+  responses:
+    Health:
+      description: Service is running.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/HealthResponse"
+    Error:
+      description: Structured error response.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: ok
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [message]
+          properties:
+            message:
+              type: string
+    CreateSessionRequest:
+      type: object
+      required: [userId, hostId, crId, connectionType]
+      properties:
+        userId:
+          type: string
+        hostId:
+          type: string
+        crId:
+          type: string
+        connectionType:
+          type: string
+          enum: [ssh]
+    OwnerInstanceRequest:
+      type: object
+      required: [ownerPodId, ownerInstanceId]
+      properties:
+        ownerPodId:
+          type: string
+        ownerInstanceId:
+          type: string
+    Session:
+      type: object
+      required: [sessionId, userId, hostId, crId, connectionType, ownerPodId, ownerInstanceId, websocketUrl, status, createdAt, lastHeartbeatAt, leaseExpiresAt]
+      properties:
+        sessionId:
+          type: string
+        userId:
+          type: string
+        hostId:
+          type: string
+        crId:
+          type: string
+        connectionType:
+          type: string
+        ownerPodId:
+          type: string
+        ownerInstanceId:
+          type: string
+        websocketUrl:
+          type: string
+        status:
+          type: string
+          enum: [ACTIVE, CLOSED]
+        createdAt:
+          type: string
+          format: date-time
+        lastHeartbeatAt:
+          type: string
+          format: date-time
+        leaseExpiresAt:
+          type: string
+          format: date-time
+    ListSessionsResponse:
+      type: object
+      required: [sessions]
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Session"
+    ProxyPod:
+      type: object
+      required: [podId, instanceId, websocketUrl, operationsUrl]
+      properties:
+        podId:
+          type: string
+        instanceId:
+          type: string
+        podIp:
+          type: string
+        websocketUrl:
+          type: string
+        operationsUrl:
+          type: string
+        status:
+          type: string
+          enum: [READY, DRAINING]
+        activeSessions:
+          type: integer
+        maxSessions:
+          type: integer
+        lastHeartbeatAt:
+          type: string
+          format: date-time
+    CreateAutomationRunRequest:
+      type: object
+      required: [incidentId, hostId]
+      properties:
+        incidentId:
+          type: string
+        hostId:
+          type: string
+    AutomationRun:
+      type: object
+      required: [runId, incidentId, hostId, ownerPodId, ownerInstanceId, operationsUrl, status, createdAt, expiresAt]
+      properties:
+        runId:
+          type: string
+        incidentId:
+          type: string
+        hostId:
+          type: string
+        ownerPodId:
+          type: string
+        ownerInstanceId:
+          type: string
+        operationsUrl:
+          type: string
+        status:
+          type: string
+          enum: [ACTIVE, CLOSED]
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
