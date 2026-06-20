@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/NUS-MTech-Capstone/session-manager/internal/config"
 	"github.com/NUS-MTech-Capstone/session-manager/internal/httpapi"
@@ -28,7 +29,15 @@ func main() {
 	svc := service.New(st, cfg.HeartbeatMaxAge, cfg.LeaseDuration, cfg.AutomationRunTTL)
 	addr := ":" + cfg.Port
 	slog.Info("server_listening", "addr", addr, "store", cfg.StoreDriver)
-	if err := http.ListenAndServe(addr, httpapi.New(svc)); err != nil {
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           httpapi.New(svc),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+	if err := server.ListenAndServe(); err != nil {
 		slog.Error("server failed", "error", err)
 		os.Exit(1)
 	}

@@ -1,6 +1,6 @@
 module github.com/NUS-MTech-Capstone/session-manager
 
-go 1.26.3
+go 1.26.4
 
 require github.com/jackc/pgx/v5 v5.7.6
 
