@@ -234,6 +234,99 @@ func TestExpiredSessionReleasesPodCapacity(t *testing.T) {
 	}
 }
 
+func TestListSessionsFiltersActiveOwnerHostAndCR(t *testing.T) {
+	st := NewMemoryStore()
+	now := time.Now().UTC()
+	st.now = func() time.Time { return now }
+	ctx := context.Background()
+	_, _ = st.RegisterPod(ctx, model.ProxyPod{
+		PodID: "pod", InstanceID: "instance-1", WebsocketURL: "ws://pod", MaxSessions: 10,
+	})
+	first, err := st.CreateSession(ctx, model.CreateSessionRequest{
+		UserID: "user-1", HostID: "host-1", CRID: "cr-1",
+	}, 15*time.Second, time.Minute)
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	now = now.Add(time.Second)
+	second, err := st.CreateSession(ctx, model.CreateSessionRequest{
+		UserID: "user-1", HostID: "host-1", CRID: "cr-1",
+	}, 15*time.Second, time.Minute)
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	now = now.Add(time.Second)
+	if _, err := st.CreateSession(ctx, model.CreateSessionRequest{
+		UserID: "user-2", HostID: "host-1", CRID: "cr-1",
+	}, 15*time.Second, time.Minute); err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	if _, err := st.CloseSession(ctx, first.SessionID, model.CloseSessionRequest{
+		OwnerPodID: "pod", OwnerInstanceID: "instance-1",
+	}); err != nil {
+		t.Fatalf("CloseSession() error = %v", err)
+	}
+
+	sessions, err := st.ListSessions(ctx, model.ListSessionsFilter{
+		UserID: "user-1", HostID: "host-1", CRID: "cr-1", Status: model.SessionStatusActive,
+	})
+	if err != nil {
+		t.Fatalf("ListSessions() error = %v", err)
+	}
+	if len(sessions) != 1 || sessions[0].SessionID != second.SessionID {
+		t.Fatalf("ListSessions() = %#v, want only second session", sessions)
+	}
+}
+
+func TestListSessionsReturnsEmptyForNoMatch(t *testing.T) {
+	st := NewMemoryStore()
+	ctx := context.Background()
+	_, _ = st.RegisterPod(ctx, model.ProxyPod{
+		PodID: "pod", InstanceID: "instance-1", WebsocketURL: "ws://pod", MaxSessions: 1,
+	})
+	if _, err := st.CreateSession(ctx, model.CreateSessionRequest{
+		UserID: "user-1", HostID: "host-1", CRID: "cr-1",
+	}, 15*time.Second, time.Minute); err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+
+	sessions, err := st.ListSessions(ctx, model.ListSessionsFilter{
+		UserID: "user-1", HostID: "host-2", CRID: "cr-1", Status: model.SessionStatusActive,
+	})
+	if err != nil {
+		t.Fatalf("ListSessions() error = %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("ListSessions() = %#v, want empty result", sessions)
+	}
+}
+
+func TestListSessionsExcludesExpiredActiveSessions(t *testing.T) {
+	st := NewMemoryStore()
+	now := time.Now().UTC()
+	st.now = func() time.Time { return now }
+	ctx := context.Background()
+	_, _ = st.RegisterPod(ctx, model.ProxyPod{
+		PodID: "pod", InstanceID: "instance-1", WebsocketURL: "ws://pod", MaxSessions: 1,
+	})
+	if _, err := st.CreateSession(ctx, model.CreateSessionRequest{
+		UserID: "user-1", HostID: "host-1", CRID: "cr-1",
+	}, 15*time.Second, time.Minute); err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+
+	now = now.Add(time.Minute)
+	sessions, err := st.ListSessions(ctx, model.ListSessionsFilter{
+		UserID: "user-1", HostID: "host-1", CRID: "cr-1", Status: model.SessionStatusActive,
+	})
+	if err != nil {
+		t.Fatalf("ListSessions() error = %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("ListSessions() = %#v, want expired session excluded", sessions)
+	}
+}
+
 func TestCloseSessionRejectsOwnerMismatch(t *testing.T) {
 	st := NewMemoryStore()
 	ctx := context.Background()

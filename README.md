@@ -40,6 +40,7 @@ go run ./cmd/server
 ```http
 GET  /healthz
 POST /sessions
+GET  /sessions?userId={userId}&hostId={hostId}&crId={crId}&status=ACTIVE
 GET  /sessions/{sessionId}
 POST /sessions/{sessionId}/heartbeat
 POST /sessions/{sessionId}/close
@@ -62,6 +63,11 @@ available pods are next accessed.
 
 Session records persist `connectionType`; it defaults to `ssh` for compatibility
 with existing callers and PostgreSQL rows.
+
+Session listing is an internal runtime lookup for control-plane workflows such
+as owner rejoin discovery. Filters are optional at the Session Manager boundary,
+but public callers should be mediated by the Proxy Control Plane so authenticated
+identity and authorization are applied before querying active sessions.
 
 Proxy pod registration includes `operationsUrl` for internal automation calls.
 Automation runs retain `ownerPodId + ownerInstanceId`, expire after

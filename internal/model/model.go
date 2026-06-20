@@ -61,6 +61,17 @@ type CreateSessionRequest struct {
 	ConnectionType string `json:"connectionType"`
 }
 
+type ListSessionsFilter struct {
+	UserID string
+	HostID string
+	CRID   string
+	Status string
+}
+
+type ListSessionsResponse struct {
+	Sessions []Session `json:"sessions"`
+}
+
 type SessionHeartbeatRequest struct {
 	OwnerPodID      string `json:"ownerPodId"`
 	OwnerInstanceID string `json:"ownerInstanceId"`

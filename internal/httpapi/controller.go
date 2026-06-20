@@ -64,6 +64,21 @@ func (s *Server) getSession(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, session)
 }
 
+func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	sessions, err := s.svc.ListSessions(r.Context(), model.ListSessionsFilter{
+		UserID: query.Get("userId"),
+		HostID: query.Get("hostId"),
+		CRID:   query.Get("crId"),
+		Status: query.Get("status"),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, model.ListSessionsResponse{Sessions: sessions})
+}
+
 func (s *Server) sessionAction(w http.ResponseWriter, r *http.Request) {
 	id, action := parseSessionPath(r.URL.Path)
 	switch action {

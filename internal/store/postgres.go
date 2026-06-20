@@ -98,6 +98,9 @@ ALTER TABLE proxy_pods
 
 CREATE INDEX IF NOT EXISTS automation_runs_incident_idx
 	ON automation_runs (incident_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS sessions_rejoin_lookup_idx
+	ON sessions (user_id, host_id, cr_id, status, created_at DESC);
 `
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("migrate postgres store: %w", err)
@@ -396,6 +399,40 @@ WHERE session_id = $1
 		return model.Session{}, fmt.Errorf("get session: %w", err)
 	}
 	return session, nil
+}
+
+func (s *PostgresStore) ListSessions(ctx context.Context, filter model.ListSessionsFilter) ([]model.Session, error) {
+	if err := s.expireSessions(ctx, s.db, s.now().UTC()); err != nil {
+		return nil, err
+	}
+	const query = `
+SELECT session_id, user_id, host_id, cr_id, connection_type, owner_pod_id, owner_instance_id,
+	websocket_url, status, created_at, last_heartbeat_at, lease_expires_at
+FROM sessions
+WHERE ($1 = '' OR user_id = $1)
+	AND ($2 = '' OR host_id = $2)
+	AND ($3 = '' OR cr_id = $3)
+	AND ($4 = '' OR status = $4)
+ORDER BY created_at DESC, session_id
+`
+	rows, err := s.db.QueryContext(ctx, query, filter.UserID, filter.HostID, filter.CRID, filter.Status)
+	if err != nil {
+		return nil, fmt.Errorf("list sessions: %w", err)
+	}
+	defer rows.Close()
+
+	sessions := make([]model.Session, 0)
+	for rows.Next() {
+		var session model.Session
+		if err := scanSession(rows, &session); err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, session)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list sessions: %w", err)
+	}
+	return sessions, nil
 }
 
 func (s *PostgresStore) HeartbeatSession(

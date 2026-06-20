@@ -14,6 +14,10 @@ func (s *Service) GetSession(ctx context.Context, id string) (model.Session, err
 	return s.store.GetSession(ctx, id)
 }
 
+func (s *Service) ListSessions(ctx context.Context, filter model.ListSessionsFilter) ([]model.Session, error) {
+	return s.store.ListSessions(ctx, filter)
+}
+
 func (s *Service) HeartbeatSession(ctx context.Context, id string, req model.SessionHeartbeatRequest) (model.Session, error) {
 	return s.store.HeartbeatSession(ctx, id, req, s.leaseDuration)
 }

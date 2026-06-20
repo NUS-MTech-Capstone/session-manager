@@ -160,6 +160,95 @@ func TestPostgresStoreExpiresSessionAndReleasesCapacity(t *testing.T) {
 	}
 }
 
+func TestPostgresStoreListSessionsFiltersAndOrders(t *testing.T) {
+	databaseURL := os.Getenv("TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_DATABASE_URL is not set")
+	}
+
+	ctx := context.Background()
+	st := newTestPostgresStore(t, ctx, databaseURL)
+	now := time.Now().UTC()
+	st.now = func() time.Time { return now }
+	if _, err := st.RegisterPod(ctx, model.ProxyPod{
+		PodID: "pod-list", InstanceID: "instance-1", WebsocketURL: "ws://proxy", MaxSessions: 10,
+	}); err != nil {
+		t.Fatalf("RegisterPod() error = %v", err)
+	}
+	first, err := st.CreateSession(ctx, model.CreateSessionRequest{
+		UserID: "user-1", HostID: "host-1", CRID: "cr-1",
+	}, 15*time.Second, time.Minute)
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	now = now.Add(time.Second)
+	second, err := st.CreateSession(ctx, model.CreateSessionRequest{
+		UserID: "user-1", HostID: "host-1", CRID: "cr-1",
+	}, 15*time.Second, time.Minute)
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+	now = now.Add(time.Second)
+	if _, err := st.CreateSession(ctx, model.CreateSessionRequest{
+		UserID: "user-2", HostID: "host-1", CRID: "cr-1",
+	}, 15*time.Second, time.Minute); err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+
+	sessions, err := st.ListSessions(ctx, model.ListSessionsFilter{
+		UserID: "user-1", HostID: "host-1", CRID: "cr-1", Status: model.SessionStatusActive,
+	})
+	if err != nil {
+		t.Fatalf("ListSessions() error = %v", err)
+	}
+	if len(sessions) != 2 || sessions[0].SessionID != second.SessionID || sessions[1].SessionID != first.SessionID {
+		t.Fatalf("ListSessions() = %#v, want second then first", sessions)
+	}
+
+	sessions, err = st.ListSessions(ctx, model.ListSessionsFilter{
+		UserID: "user-1", HostID: "host-2", CRID: "cr-1", Status: model.SessionStatusActive,
+	})
+	if err != nil {
+		t.Fatalf("ListSessions() no match error = %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("ListSessions() no match = %#v, want empty result", sessions)
+	}
+}
+
+func TestPostgresStoreListSessionsExcludesExpiredActiveSessions(t *testing.T) {
+	databaseURL := os.Getenv("TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("TEST_DATABASE_URL is not set")
+	}
+
+	ctx := context.Background()
+	st := newTestPostgresStore(t, ctx, databaseURL)
+	now := time.Now().UTC()
+	st.now = func() time.Time { return now }
+	if _, err := st.RegisterPod(ctx, model.ProxyPod{
+		PodID: "pod-list-expiry", InstanceID: "instance-1", WebsocketURL: "ws://proxy", MaxSessions: 1,
+	}); err != nil {
+		t.Fatalf("RegisterPod() error = %v", err)
+	}
+	if _, err := st.CreateSession(ctx, model.CreateSessionRequest{
+		UserID: "user-1", HostID: "host-1", CRID: "cr-1",
+	}, 15*time.Second, time.Minute); err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+
+	now = now.Add(time.Minute)
+	sessions, err := st.ListSessions(ctx, model.ListSessionsFilter{
+		UserID: "user-1", HostID: "host-1", CRID: "cr-1", Status: model.SessionStatusActive,
+	})
+	if err != nil {
+		t.Fatalf("ListSessions() error = %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("ListSessions() = %#v, want expired session excluded", sessions)
+	}
+}
+
 func TestPostgresStoreRejectsCloseOwnerMismatch(t *testing.T) {
 	databaseURL := os.Getenv("TEST_DATABASE_URL")
 	if databaseURL == "" {

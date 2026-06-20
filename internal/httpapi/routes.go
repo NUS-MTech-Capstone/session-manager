@@ -7,6 +7,7 @@ func (s *Server) routes() {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 	s.mux.HandleFunc("POST /sessions", s.createSession)
+	s.mux.HandleFunc("GET /sessions", s.listSessions)
 	s.mux.HandleFunc("GET /sessions/", s.getSession)
 	s.mux.HandleFunc("POST /sessions/", s.sessionAction)
 	s.mux.HandleFunc("POST /proxy-pods/register", s.registerPod)

@@ -188,6 +188,35 @@ func (s *MemoryStore) GetSession(_ context.Context, id string) (model.Session, e
 	return session, nil
 }
 
+func (s *MemoryStore) ListSessions(_ context.Context, filter model.ListSessionsFilter) ([]model.Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.expireSessionsLocked()
+	sessions := make([]model.Session, 0)
+	for _, session := range s.sessions {
+		if filter.UserID != "" && session.UserID != filter.UserID {
+			continue
+		}
+		if filter.HostID != "" && session.HostID != filter.HostID {
+			continue
+		}
+		if filter.CRID != "" && session.CRID != filter.CRID {
+			continue
+		}
+		if filter.Status != "" && session.Status != filter.Status {
+			continue
+		}
+		sessions = append(sessions, session)
+	}
+	sort.Slice(sessions, func(i, j int) bool {
+		if sessions[i].CreatedAt.Equal(sessions[j].CreatedAt) {
+			return sessions[i].SessionID < sessions[j].SessionID
+		}
+		return sessions[i].CreatedAt.After(sessions[j].CreatedAt)
+	})
+	return sessions, nil
+}
+
 func (s *MemoryStore) HeartbeatSession(_ context.Context, id string, req model.SessionHeartbeatRequest, lease time.Duration) (model.Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
