@@ -1,7 +1,6 @@
 # Session Manager
 
-Registry for active sessions and proxy dataplane pods. It supports an in-memory
-store for simple local runs and Postgres for durable deployments.
+Registry for active sessions and proxy dataplane pods. It supports an in-memory store for  local runs and Postgres for durable deployments.
 
 ## Run
 
