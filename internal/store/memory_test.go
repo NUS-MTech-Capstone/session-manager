@@ -385,3 +385,68 @@ func TestAutomationRunUsesOperationsURLAndOwnerInstance(t *testing.T) {
 		t.Fatalf("status = %s", expired.Status)
 	}
 }
+
+func TestCreateSessionRejectsFullPods(t *testing.T) {
+	st := NewMemoryStore()
+	ctx := context.Background()
+	_, _ = st.RegisterPod(ctx, model.ProxyPod{
+		PodID: "full", InstanceID: "instance-1", WebsocketURL: "ws://full",
+		ActiveSessions: 1, MaxSessions: 1,
+	})
+
+	_, err := st.CreateSession(ctx, model.CreateSessionRequest{
+		UserID: "user-1", HostID: "host-1", CRID: "cr-1",
+	}, 15*time.Second, time.Minute)
+	if err != ErrNoAvailablePod {
+		t.Fatalf("CreateSession() error = %v, want ErrNoAvailablePod", err)
+	}
+}
+
+func TestHeartbeatSessionRejectsOwnerInstanceMismatch(t *testing.T) {
+	st := NewMemoryStore()
+	ctx := context.Background()
+	_, _ = st.RegisterPod(ctx, model.ProxyPod{
+		PodID: "pod", InstanceID: "instance-1", WebsocketURL: "ws://pod", MaxSessions: 1,
+	})
+	session, err := st.CreateSession(ctx, model.CreateSessionRequest{
+		UserID: "user-1", HostID: "host-1", CRID: "cr-1",
+	}, 15*time.Second, time.Minute)
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+
+	_, err = st.HeartbeatSession(ctx, session.SessionID, model.SessionHeartbeatRequest{
+		OwnerPodID: "pod", OwnerInstanceID: "instance-2",
+	}, time.Minute)
+	if err == nil {
+		t.Fatal("HeartbeatSession() error = nil, want owner mismatch")
+	}
+}
+
+func TestAutomationRunRequiresFreshPodWithOperationsURL(t *testing.T) {
+	st := NewMemoryStore()
+	now := time.Now().UTC()
+	st.now = func() time.Time { return now }
+	ctx := context.Background()
+	_, _ = st.RegisterPod(ctx, model.ProxyPod{
+		PodID: "ssh-only", InstanceID: "instance-1", WebsocketURL: "ws://pod", MaxSessions: 1,
+	})
+
+	_, err := st.CreateAutomationRun(ctx, model.CreateAutomationRunRequest{
+		IncidentID: "inc-1", HostID: "host-1",
+	}, 15*time.Second, time.Minute)
+	if err != ErrNoAvailablePod {
+		t.Fatalf("CreateAutomationRun() error = %v, want ErrNoAvailablePod", err)
+	}
+
+	_, _ = st.RegisterPod(ctx, model.ProxyPod{
+		PodID: "ops", InstanceID: "instance-2", WebsocketURL: "ws://pod", OperationsURL: "http://ops", MaxSessions: 1,
+	})
+	now = now.Add(20 * time.Second)
+	_, err = st.CreateAutomationRun(ctx, model.CreateAutomationRunRequest{
+		IncidentID: "inc-1", HostID: "host-1",
+	}, 15*time.Second, time.Minute)
+	if err != ErrNoAvailablePod {
+		t.Fatalf("CreateAutomationRun() error = %v, want ErrNoAvailablePod for stale pod", err)
+	}
+}
