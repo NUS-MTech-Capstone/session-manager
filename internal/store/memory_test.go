@@ -386,6 +386,39 @@ func TestAutomationRunUsesOperationsURLAndOwnerInstance(t *testing.T) {
 	}
 }
 
+func TestCloseAutomationRunMarksClosedAndRejectsUnknownRun(t *testing.T) {
+	st := NewMemoryStore()
+	ctx := context.Background()
+	_, _ = st.RegisterPod(ctx, model.ProxyPod{
+		PodID: "pod", InstanceID: "instance-1", WebsocketURL: "ws://proxy",
+		OperationsURL: "http://10.0.0.10:8083", MaxSessions: 50,
+	})
+	run, err := st.CreateAutomationRun(ctx, model.CreateAutomationRunRequest{
+		IncidentID: "inc-1", HostID: "host-1",
+	}, 15*time.Second, time.Hour)
+	if err != nil {
+		t.Fatalf("CreateAutomationRun() error = %v", err)
+	}
+
+	closed, err := st.CloseAutomationRun(ctx, run.RunID)
+	if err != nil {
+		t.Fatalf("CloseAutomationRun() error = %v", err)
+	}
+	if closed.Status != model.AutomationRunClosed {
+		t.Fatalf("status = %q, want %q", closed.Status, model.AutomationRunClosed)
+	}
+	stored, err := st.GetAutomationRun(ctx, run.RunID)
+	if err != nil {
+		t.Fatalf("GetAutomationRun() error = %v", err)
+	}
+	if stored.Status != model.AutomationRunClosed {
+		t.Fatalf("stored status = %q, want %q", stored.Status, model.AutomationRunClosed)
+	}
+	if _, err := st.CloseAutomationRun(ctx, "missing"); err != ErrNotFound {
+		t.Fatalf("CloseAutomationRun() error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestCreateSessionRejectsFullPods(t *testing.T) {
 	st := NewMemoryStore()
 	ctx := context.Background()
