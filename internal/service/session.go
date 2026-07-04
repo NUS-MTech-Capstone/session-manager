@@ -2,12 +2,32 @@ package service
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 
 	"github.com/NUS-MTech-Capstone/session-manager/internal/model"
+	"github.com/NUS-MTech-Capstone/session-manager/internal/observability"
+	"github.com/NUS-MTech-Capstone/session-manager/internal/store"
 )
 
 func (s *Service) CreateSession(ctx context.Context, req model.CreateSessionRequest) (model.Session, error) {
-	return s.store.CreateSession(ctx, req, s.heartbeatMaxAge, s.leaseDuration)
+	session, err := s.store.CreateSession(ctx, req, s.heartbeatMaxAge, s.leaseDuration)
+	if err != nil {
+		if errors.Is(err, store.ErrNoAvailablePod) {
+			observability.EmitCount("session-manager", "AssignmentFailures", map[string]string{"Component": "session_assignment", "Reason": "no_available_pod"})
+			observability.EmitCount("session-manager", "StaleProxyPods", map[string]string{"Component": "session_assignment", "Reason": "no_available_pod"})
+			slog.WarnContext(ctx, "ProxyPodUnhealthy",
+				"requestId", observability.RequestID(ctx),
+				"hostId", req.HostID,
+				"crId", req.CRID,
+				"errorKind", observability.ErrorKind(err),
+				"error", err,
+			)
+		}
+		return model.Session{}, err
+	}
+	s.emitFleetGauges(ctx)
+	return session, nil
 }
 
 func (s *Service) GetSession(ctx context.Context, id string) (model.Session, error) {
@@ -19,15 +39,28 @@ func (s *Service) ListSessions(ctx context.Context, filter model.ListSessionsFil
 }
 
 func (s *Service) HeartbeatSession(ctx context.Context, id string, req model.SessionHeartbeatRequest) (model.Session, error) {
-	return s.store.HeartbeatSession(ctx, id, req, s.leaseDuration)
+	session, err := s.store.HeartbeatSession(ctx, id, req, s.leaseDuration)
+	if err != nil {
+		observability.EmitCount("session-manager", "HeartbeatMisses", map[string]string{"Component": "session", "Reason": observability.ErrorKind(err)})
+		return model.Session{}, err
+	}
+	return session, nil
 }
 
 func (s *Service) CloseSession(ctx context.Context, id string, req model.CloseSessionRequest) (model.Session, error) {
-	return s.store.CloseSession(ctx, id, req)
+	session, err := s.store.CloseSession(ctx, id, req)
+	if err == nil {
+		s.emitFleetGauges(ctx)
+	}
+	return session, err
 }
 
 func (s *Service) CreateAutomationRun(ctx context.Context, req model.CreateAutomationRunRequest) (model.AutomationRun, error) {
-	return s.store.CreateAutomationRun(ctx, req, s.heartbeatMaxAge, s.automationRunTTL)
+	run, err := s.store.CreateAutomationRun(ctx, req, s.heartbeatMaxAge, s.automationRunTTL)
+	if err != nil && errors.Is(err, store.ErrNoAvailablePod) {
+		observability.EmitCount("session-manager", "AssignmentFailures", map[string]string{"Component": "automation_assignment", "Reason": "no_available_pod"})
+	}
+	return run, err
 }
 
 func (s *Service) GetAutomationRun(ctx context.Context, id string) (model.AutomationRun, error) {
