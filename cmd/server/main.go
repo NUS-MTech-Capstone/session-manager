@@ -2,11 +2,9 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/NUS-MTech-Capstone/session-manager/internal/config"
@@ -44,19 +42,5 @@ func main() {
 }
 
 func newStore(ctx context.Context, cfg config.Config) (store.Store, func(), error) {
-	switch strings.ToLower(cfg.StoreDriver) {
-	case "", "memory":
-		return store.NewMemoryStore(), func() {}, nil
-	case "postgres":
-		if cfg.DatabaseURL == "" {
-			return nil, nil, fmt.Errorf("DATABASE_URL is required when STORE_DRIVER=postgres")
-		}
-		st, err := store.NewPostgresStore(ctx, cfg.DatabaseURL)
-		if err != nil {
-			return nil, nil, err
-		}
-		return st, func() { _ = st.Close() }, nil
-	default:
-		return nil, nil, fmt.Errorf("unsupported STORE_DRIVER %q", cfg.StoreDriver)
-	}
+	return store.Open(ctx, store.OpenConfig{Driver: cfg.StoreDriver, DatabaseURL: cfg.DatabaseURL})
 }

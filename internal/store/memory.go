@@ -23,6 +23,7 @@ type MemoryStore struct {
 	automationRuns map[string]model.AutomationRun
 	pods           map[string]model.ProxyPod
 	now            func() time.Time
+	podSelection   PodSelectionStrategy
 }
 
 var _ Store = (*MemoryStore)(nil)
@@ -33,6 +34,7 @@ func NewMemoryStore() *MemoryStore {
 		automationRuns: make(map[string]model.AutomationRun),
 		pods:           make(map[string]model.ProxyPod),
 		now:            time.Now,
+		podSelection:   LeastActivePodSelectionStrategy{},
 	}
 }
 
@@ -40,18 +42,8 @@ func (s *MemoryStore) CreateAutomationRun(_ context.Context, req model.CreateAut
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.now().UTC()
-	cutoff := now.Add(-heartbeatMaxAge)
-	var chosen *model.ProxyPod
-	for _, pod := range s.pods {
-		pod := pod
-		if pod.Status != model.PodStatusReady || pod.OperationsURL == "" || !pod.LastHeartbeatAt.After(cutoff) {
-			continue
-		}
-		if chosen == nil || pod.ActiveSessions < chosen.ActiveSessions || pod.ActiveSessions == chosen.ActiveSessions && pod.PodID < chosen.PodID {
-			chosen = &pod
-		}
-	}
-	if chosen == nil {
+	chosen, ok := s.podSelection.ChooseAutomationPod(s.pods, now, heartbeatMaxAge)
+	if !ok {
 		return model.AutomationRun{}, ErrNoAvailablePod
 	}
 	run := model.AutomationRun{
@@ -117,20 +109,7 @@ func (s *MemoryStore) AvailablePods(_ context.Context, maxAge time.Duration) ([]
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.expireSessionsLocked()
-	cutoff := s.now().Add(-maxAge)
-	var pods []model.ProxyPod
-	for _, pod := range s.pods {
-		if pod.Status == model.PodStatusReady && pod.LastHeartbeatAt.After(cutoff) && pod.ActiveSessions < pod.MaxSessions {
-			pods = append(pods, pod)
-		}
-	}
-	sort.Slice(pods, func(i, j int) bool {
-		if pods[i].ActiveSessions == pods[j].ActiveSessions {
-			return pods[i].PodID < pods[j].PodID
-		}
-		return pods[i].ActiveSessions < pods[j].ActiveSessions
-	})
-	return pods, nil
+	return s.podSelection.AvailablePods(s.pods, s.now().UTC(), maxAge), nil
 }
 
 func (s *MemoryStore) CreateSession(_ context.Context, req model.CreateSessionRequest, heartbeatMaxAge time.Duration, lease time.Duration) (model.Session, error) {
@@ -138,22 +117,12 @@ func (s *MemoryStore) CreateSession(_ context.Context, req model.CreateSessionRe
 	defer s.mu.Unlock()
 	s.expireSessionsLocked()
 	now := s.now().UTC()
-	cutoff := now.Add(-heartbeatMaxAge)
-	var chosen *model.ProxyPod
-	for _, pod := range s.pods {
-		pod := pod
-		if pod.Status != model.PodStatusReady || !pod.LastHeartbeatAt.After(cutoff) || pod.ActiveSessions >= pod.MaxSessions {
-			continue
-		}
-		if chosen == nil || pod.ActiveSessions < chosen.ActiveSessions || pod.ActiveSessions == chosen.ActiveSessions && pod.PodID < chosen.PodID {
-			chosen = &pod
-		}
-	}
-	if chosen == nil {
+	chosen, ok := s.podSelection.ChooseInteractivePod(s.pods, now, heartbeatMaxAge)
+	if !ok {
 		return model.Session{}, ErrNoAvailablePod
 	}
 	chosen.ActiveSessions++
-	s.pods[chosen.PodID] = *chosen
+	s.pods[chosen.PodID] = chosen
 
 	id := fmt.Sprintf("sess-%d", now.UnixNano())
 	if req.ConnectionType == "" {

@@ -63,6 +63,15 @@ available pods are next accessed.
 Session records persist `connectionType`; it defaults to `ssh` for compatibility
 with existing callers and PostgreSQL rows.
 
+## Design Patterns
+
+The Session Manager uses a Repository pattern through `store.Store`, with
+in-memory and Postgres implementations behind the same service boundary.
+`store.Open` is a Factory for selecting the configured store driver at startup.
+The in-memory store uses `PodSelectionStrategy`; the default
+`LeastActivePodSelectionStrategy` picks the READY pod with the lowest
+`activeSessions`, using `podId` as a deterministic tie-breaker.
+
 Session listing is an internal runtime lookup for control-plane workflows such
 as owner rejoin discovery. Filters are optional at the Session Manager boundary,
 but public callers should be mediated by the Proxy Control Plane so authenticated
@@ -72,6 +81,11 @@ Proxy pod registration includes `operationsUrl` for internal automation calls.
 Automation runs retain `ownerPodId + ownerInstanceId`, expire after
 `AUTOMATION_RUN_TTL_SECONDS` (default `3600`), and do not reserve interactive
 session capacity while a plan waits for approval.
+
+For Phase 2 agent workflows, Session Manager stores assignment and lifecycle
+metadata only. It does not route model prompts, command output, terminal
+streams, or remediation decisions. Automation callers must use the assigned
+pod's `operationsUrl` together with STS capability validation.
 
 Session heartbeat and close requests must include the assigned owner:
 

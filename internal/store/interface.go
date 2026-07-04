@@ -7,6 +7,7 @@ import (
 	"github.com/NUS-MTech-Capstone/session-manager/internal/model"
 )
 
+// Store is the repository boundary for session, pod, and automation run state.
 type Store interface {
 	RegisterPod(context.Context, model.ProxyPod) (model.ProxyPod, error)
 	HeartbeatPod(context.Context, model.ProxyPod) (model.ProxyPod, error)
