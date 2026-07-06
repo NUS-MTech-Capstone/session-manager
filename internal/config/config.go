@@ -13,6 +13,9 @@ type Config struct {
 	HeartbeatMaxAge  time.Duration
 	LeaseDuration    time.Duration
 	AutomationRunTTL time.Duration
+	AWSRegion        string
+	EventPublisher   bool
+	EventsTopicARN   string
 }
 
 func Load() Config {
@@ -23,6 +26,9 @@ func Load() Config {
 		HeartbeatMaxAge:  secondsEnv("HEARTBEAT_MAX_AGE_SECONDS", 15),
 		LeaseDuration:    secondsEnv("SESSION_LEASE_SECONDS", 60),
 		AutomationRunTTL: secondsEnv("AUTOMATION_RUN_TTL_SECONDS", 3600),
+		AWSRegion:        env("AWS_REGION", "ap-southeast-1"),
+		EventPublisher:   boolEnv("EVENT_PUBLISHER_ENABLED", false),
+		EventsTopicARN:   os.Getenv("EVENTS_TOPIC_ARN"),
 	}
 }
 
@@ -39,4 +45,16 @@ func secondsEnv(key string, fallback int) time.Duration {
 		v = fallback
 	}
 	return time.Duration(v) * time.Second
+}
+
+func boolEnv(key string, fallback bool) bool {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }

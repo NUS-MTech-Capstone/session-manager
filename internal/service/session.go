@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 
+	"github.com/NUS-MTech-Capstone/session-manager/internal/events"
 	"github.com/NUS-MTech-Capstone/session-manager/internal/model"
 	"github.com/NUS-MTech-Capstone/session-manager/internal/observability"
 	"github.com/NUS-MTech-Capstone/session-manager/internal/store"
@@ -27,6 +28,19 @@ func (s *Service) CreateSession(ctx context.Context, req model.CreateSessionRequ
 		return model.Session{}, err
 	}
 	s.emitFleetGauges(ctx)
+	s.events.Emit(ctx, events.Event{
+		EventType:  "SessionCreated",
+		RequestID:  observability.RequestID(ctx),
+		SessionID:  session.SessionID,
+		UserID:     session.UserID,
+		HostID:     session.HostID,
+		CRID:       session.CRID,
+		PodID:      session.OwnerPodID,
+		InstanceID: session.OwnerInstanceID,
+		Action:     "start",
+		Mode:       "owner",
+		Outcome:    "created",
+	})
 	return session, nil
 }
 
@@ -51,6 +65,18 @@ func (s *Service) CloseSession(ctx context.Context, id string, req model.CloseSe
 	session, err := s.store.CloseSession(ctx, id, req)
 	if err == nil {
 		s.emitFleetGauges(ctx)
+		s.events.Emit(ctx, events.Event{
+			EventType:  "SessionClosed",
+			RequestID:  observability.RequestID(ctx),
+			SessionID:  session.SessionID,
+			UserID:     session.UserID,
+			HostID:     session.HostID,
+			CRID:       session.CRID,
+			PodID:      session.OwnerPodID,
+			InstanceID: session.OwnerInstanceID,
+			Action:     "close",
+			Outcome:    "closed",
+		})
 	}
 	return session, err
 }

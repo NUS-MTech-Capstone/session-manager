@@ -34,6 +34,20 @@ DATABASE_URL='postgres://user:password@host:5432/database?sslmode=require' \
 go run ./cmd/server
 ```
 
+Optional lifecycle event publication:
+
+```bash
+EVENT_PUBLISHER_ENABLED=true
+EVENTS_TOPIC_ARN=arn:aws:sns:ap-southeast-1:123456789012:dendenmushi-events-dev
+AWS_REGION=ap-southeast-1
+```
+
+When enabled, Session Manager publishes authoritative `SessionCreated` and
+`SessionClosed` metadata events after the store mutation succeeds. Events
+include assignment metadata such as `podId` and `instanceId`, but not session
+tokens, terminal streams, command bodies, or secrets. Publish failures are
+logged and do not affect assignment, heartbeat, lease, or close behavior.
+
 ## Endpoints
 
 ```http
