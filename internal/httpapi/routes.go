@@ -13,6 +13,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /openapi.yaml", serveYAML(api.OpenAPI))
 	s.mux.HandleFunc("POST /sessions", s.createSession)
 	s.mux.HandleFunc("GET /sessions", s.listSessions)
+	s.mux.HandleFunc("GET /sessions/audit", s.listAuditSessions)
 	s.mux.HandleFunc("GET /sessions/", s.getSession)
 	s.mux.HandleFunc("POST /sessions/", s.sessionAction)
 	s.mux.HandleFunc("POST /proxy-pods/register", s.registerPod)

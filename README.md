@@ -43,6 +43,9 @@ GET  /sessions?userId={userId}&hostId={hostId}&crId={crId}&status=ACTIVE
 GET  /sessions/{sessionId}
 POST /sessions/{sessionId}/heartbeat
 POST /sessions/{sessionId}/close
+GET  /sessions/audit?userId={userId}&hostId={hostId}&crId={crId}&sessionId={sessionId}
+POST /sessions/{sessionId}/audit/records
+GET  /sessions/{sessionId}/audit/records
 POST /proxy-pods/register
 POST /proxy-pods/heartbeat
 GET  /proxy-pods/available
@@ -63,6 +66,22 @@ available pods are next accessed.
 Session records persist `connectionType`; it defaults to `ssh` for compatibility
 with existing callers and PostgreSQL rows.
 
+Session command/output audit is retained by Session Manager, not CloudWatch.
+Proxy Dataplane appends audit records with the assigned `ownerPodId` and
+`ownerInstanceId`; stale owners are rejected. Records include best-effort
+command lines, output bytes encoded as base64 in JSON, control/session events,
+per-session sequence numbers, and truncation flags. Defaults:
+
+```bash
+SESSION_AUDIT_RETENTION_SECONDS=604800
+SESSION_AUDIT_MAX_BYTES_PER_SESSION=16777216
+```
+
+When the per-session cap is reached, existing records are preserved, the
+truncating record is marked `truncated=true`, and the dataplane stops sending
+additional audit output for that session. Command and output bodies must not be
+written to normal application logs.
+
 ## Design Patterns
 
 The Session Manager uses a Repository pattern through `store.Store`, with
@@ -82,10 +101,10 @@ Automation runs retain `ownerPodId + ownerInstanceId`, expire after
 `AUTOMATION_RUN_TTL_SECONDS` (default `3600`), and do not reserve interactive
 session capacity while a plan waits for approval.
 
-For Phase 2 agent workflows, Session Manager stores assignment and lifecycle
-metadata only. It does not route model prompts, command output, terminal
-streams, or remediation decisions. Automation callers must use the assigned
-pod's `operationsUrl` together with STS capability validation.
+For Phase 2 agent workflows, Session Manager stores assignment, lifecycle, and
+retained session audit metadata only. It does not route model prompts, live
+terminal streams, or remediation decisions. Automation callers must use the
+assigned pod's `operationsUrl` together with STS capability validation.
 
 Session heartbeat and close requests must include the assigned owner:
 

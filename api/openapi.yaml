@@ -121,6 +121,97 @@ paths:
           $ref: "#/components/responses/Error"
         "409":
           $ref: "#/components/responses/Error"
+  /sessions/audit:
+    get:
+      summary: List sessions with retained command/output audit records
+      parameters:
+        - name: sessionId
+          in: query
+          schema:
+            type: string
+        - name: userId
+          in: query
+          schema:
+            type: string
+        - name: hostId
+          in: query
+          schema:
+            type: string
+        - name: crId
+          in: query
+          schema:
+            type: string
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Matching audited sessions.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListAuditSessionsResponse"
+  /sessions/{sessionId}/audit/records:
+    post:
+      summary: Append command/output audit records for the owning dataplane process
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AppendSessionAuditRecordsRequest"
+      responses:
+        "201":
+          description: Accepted audit records.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListSessionAuditRecordsResponse"
+        "400":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+    get:
+      summary: List retained command/output audit records for a session
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+        - name: cursor
+          in: query
+          schema:
+            type: string
+            description: Last seen sequence number.
+      responses:
+        "200":
+          description: Retained audit records.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListSessionAuditRecordsResponse"
+        "404":
+          $ref: "#/components/responses/Error"
   /proxy-pods/register:
     post:
       summary: Register a proxy dataplane process
@@ -325,6 +416,117 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Session"
+    AppendSessionAuditRecord:
+      type: object
+      required: [recordType]
+      properties:
+        recordType:
+          type: string
+          enum: [command, output, control, session_event]
+        commandId:
+          type: string
+        commandText:
+          type: string
+        outputDataBase64:
+          type: string
+          contentEncoding: base64
+        createdAt:
+          type: string
+          format: date-time
+        truncated:
+          type: boolean
+        byteCount:
+          type: integer
+    AppendSessionAuditRecordsRequest:
+      type: object
+      required: [ownerPodId, ownerInstanceId, records]
+      properties:
+        ownerPodId:
+          type: string
+        ownerInstanceId:
+          type: string
+        records:
+          type: array
+          items:
+            $ref: "#/components/schemas/AppendSessionAuditRecord"
+    SessionAuditRecord:
+      type: object
+      required: [sessionId, userId, hostId, crId, recordType, sequence, createdAt, truncated, byteCount]
+      properties:
+        sessionId:
+          type: string
+        userId:
+          type: string
+        hostId:
+          type: string
+        crId:
+          type: string
+        recordType:
+          type: string
+          enum: [command, output, control, session_event]
+        sequence:
+          type: integer
+          format: int64
+        commandId:
+          type: string
+        commandText:
+          type: string
+        outputDataBase64:
+          type: string
+          contentEncoding: base64
+        createdAt:
+          type: string
+          format: date-time
+        truncated:
+          type: boolean
+        byteCount:
+          type: integer
+    ListSessionAuditRecordsResponse:
+      type: object
+      required: [records]
+      properties:
+        records:
+          type: array
+          items:
+            $ref: "#/components/schemas/SessionAuditRecord"
+        nextCursor:
+          type: string
+    AuditSessionSummary:
+      type: object
+      required: [sessionId, userId, hostId, crId, connectionType, status, createdAt, lastAuditAt, recordCount, truncated]
+      properties:
+        sessionId:
+          type: string
+        userId:
+          type: string
+        hostId:
+          type: string
+        crId:
+          type: string
+        connectionType:
+          type: string
+        status:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        lastAuditAt:
+          type: string
+          format: date-time
+        recordCount:
+          type: integer
+        truncated:
+          type: boolean
+    ListAuditSessionsResponse:
+      type: object
+      required: [sessions]
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditSessionSummary"
+        nextCursor:
+          type: string
     ProxyPod:
       type: object
       required: [podId, instanceId, websocketUrl, operationsUrl]

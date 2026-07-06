@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/base64"
 	"testing"
 	"time"
 
@@ -23,6 +24,72 @@ func TestCreateSessionChoosesReadyPodWithLowestActiveSessions(t *testing.T) {
 	}
 	if session.ConnectionType != "ssh" {
 		t.Fatalf("ConnectionType = %q, want ssh default", session.ConnectionType)
+	}
+}
+
+func TestMemoryStoreSessionAuditAppendListAndCap(t *testing.T) {
+	st := NewMemoryStore()
+	ctx := context.Background()
+	_, _ = st.RegisterPod(ctx, model.ProxyPod{
+		PodID: "pod", InstanceID: "instance-1", WebsocketURL: "ws://pod", MaxSessions: 1,
+	})
+	session, err := st.CreateSession(
+		ctx,
+		model.CreateSessionRequest{UserID: "user-1", HostID: "host-1", CRID: "cr-1"},
+		15*time.Second,
+		time.Minute,
+	)
+	if err != nil {
+		t.Fatalf("CreateSession() error = %v", err)
+	}
+
+	_, err = st.AppendSessionAuditRecords(ctx, session.SessionID, model.AppendSessionAuditRecordsRequest{
+		OwnerPodID: "pod", OwnerInstanceID: "stale",
+		Records: []model.AppendSessionAuditRecord{{RecordType: model.AuditRecordCommand, CommandText: "pwd"}},
+	}, 7*24*time.Hour, 1024)
+	if err == nil {
+		t.Fatal("AppendSessionAuditRecords accepted stale owner instance")
+	}
+
+	output := base64.StdEncoding.EncodeToString([]byte("abcdef"))
+	appended, err := st.AppendSessionAuditRecords(ctx, session.SessionID, model.AppendSessionAuditRecordsRequest{
+		OwnerPodID: "pod", OwnerInstanceID: "instance-1",
+		Records: []model.AppendSessionAuditRecord{
+			{RecordType: model.AuditRecordCommand, CommandID: "cmd-1", CommandText: "pwd"},
+			{RecordType: model.AuditRecordOutput, CommandID: "cmd-1", OutputDataBase64: output, ByteCount: 6},
+		},
+	}, 7*24*time.Hour, 6)
+	if err != nil {
+		t.Fatalf("AppendSessionAuditRecords() error = %v", err)
+	}
+	if len(appended) != 2 || appended[0].Sequence != 1 || appended[1].Sequence != 2 {
+		t.Fatalf("appended = %#v", appended)
+	}
+	if !appended[1].Truncated {
+		t.Fatalf("output record was not truncated: %#v", appended[1])
+	}
+	data, err := base64.StdEncoding.DecodeString(appended[1].OutputDataBase64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "abc" {
+		t.Fatalf("stored output = %q, want truncated abc", string(data))
+	}
+
+	records, err := st.ListSessionAuditRecords(ctx, session.SessionID, model.ListSessionAuditRecordsFilter{Limit: 10}, 7*24*time.Hour)
+	if err != nil {
+		t.Fatalf("ListSessionAuditRecords() error = %v", err)
+	}
+	if len(records) != 2 || records[1].CommandID != "cmd-1" {
+		t.Fatalf("records = %#v", records)
+	}
+
+	summaries, err := st.ListAuditSessions(ctx, model.ListAuditSessionsFilter{UserID: "user-1", Limit: 10}, 7*24*time.Hour)
+	if err != nil {
+		t.Fatalf("ListAuditSessions() error = %v", err)
+	}
+	if len(summaries) != 1 || !summaries[0].Truncated || summaries[0].RecordCount != 2 {
+		t.Fatalf("summaries = %#v", summaries)
 	}
 }
 

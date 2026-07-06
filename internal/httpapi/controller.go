@@ -4,7 +4,9 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/NUS-MTech-Capstone/session-manager/internal/model"
 	"github.com/NUS-MTech-Capstone/session-manager/internal/observability"
@@ -52,6 +54,10 @@ func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) getSession(w http.ResponseWriter, r *http.Request) {
 	id, action := parseSessionPath(r.URL.Path)
+	if action == "audit/records" {
+		s.listSessionAuditRecords(w, r, id)
+		return
+	}
 	if action != "" {
 		http.NotFound(w, r)
 		return
@@ -77,6 +83,57 @@ func (s *Server) listSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, model.ListSessionsResponse{Sessions: sessions})
+}
+
+func (s *Server) listAuditSessions(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	from, err := parseOptionalTime(query.Get("from"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "from must be RFC3339")
+		return
+	}
+	to, err := parseOptionalTime(query.Get("to"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "to must be RFC3339")
+		return
+	}
+	response, err := s.svc.ListAuditSessions(r.Context(), model.ListAuditSessionsFilter{
+		SessionID: query.Get("sessionId"),
+		UserID:    query.Get("userId"),
+		HostID:    query.Get("hostId"),
+		CRID:      query.Get("crId"),
+		From:      from,
+		To:        to,
+		Limit:     parsePositiveInt(query.Get("limit"), 50),
+		Offset:    parsePositiveInt(query.Get("cursor"), 0),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) listSessionAuditRecords(w http.ResponseWriter, r *http.Request, sessionID string) {
+	query := r.URL.Query()
+	afterSequence, err := parseOptionalInt64(query.Get("cursor"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "cursor must be an integer sequence")
+		return
+	}
+	response, err := s.svc.ListSessionAuditRecords(r.Context(), sessionID, model.ListSessionAuditRecordsFilter{
+		AfterSequence: afterSequence,
+		Limit:         parsePositiveInt(query.Get("limit"), 100),
+	})
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, store.ErrNotFound) {
+			status = http.StatusNotFound
+		}
+		writeError(w, status, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) sessionAction(w http.ResponseWriter, r *http.Request) {
@@ -129,6 +186,25 @@ func (s *Server) sessionAction(w http.ResponseWriter, r *http.Request) {
 			"instanceId", session.OwnerInstanceID,
 		)
 		writeJSON(w, http.StatusOK, session)
+	case "audit/records":
+		var req model.AppendSessionAuditRecordsRequest
+		if !decode(w, r, &req) {
+			return
+		}
+		if req.OwnerPodID == "" || req.OwnerInstanceID == "" {
+			writeError(w, http.StatusBadRequest, "ownerPodId and ownerInstanceId are required")
+			return
+		}
+		records, err := s.svc.AppendSessionAuditRecords(r.Context(), id, req)
+		if err != nil {
+			status := http.StatusBadRequest
+			if errors.Is(err, store.ErrNotFound) {
+				status = http.StatusNotFound
+			}
+			writeError(w, status, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusCreated, model.ListSessionAuditRecordsResponse{Records: records})
 	default:
 		http.NotFound(w, r)
 	}
@@ -251,7 +327,36 @@ func parseSessionPath(path string) (string, string) {
 	if len(parts) == 2 {
 		return parts[1], ""
 	}
-	return parts[1], parts[2]
+	return parts[1], strings.Join(parts[2:], "/")
+}
+
+func parsePositiveInt(raw string, fallback int) int {
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 0 {
+		return fallback
+	}
+	return value
+}
+
+func parseOptionalInt64(raw string) (int64, error) {
+	if raw == "" {
+		return 0, nil
+	}
+	return strconv.ParseInt(raw, 10, 64)
+}
+
+func parseOptionalTime(raw string) (time.Time, error) {
+	if raw == "" {
+		return time.Time{}, nil
+	}
+	parsed, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return parsed.UTC(), nil
 }
 
 func parseAutomationRunPath(path string) (string, string) {

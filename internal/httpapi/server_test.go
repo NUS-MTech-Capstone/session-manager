@@ -69,6 +69,40 @@ func TestSessionHTTPCreateHeartbeatListAndClose(t *testing.T) {
 	doJSON(t, server, http.MethodPost, "/sessions/"+session.SessionID+"/heartbeat", `{"ownerPodId":"pod-1","ownerInstanceId":"instance-1"}`, http.StatusConflict)
 }
 
+func TestSessionAuditHTTPAppendAndList(t *testing.T) {
+	server := newHTTPTestServer()
+	doJSON(t, server, http.MethodPost, "/proxy-pods/register", `{
+		"podId":"pod-1","instanceId":"instance-1","websocketUrl":"wss://proxy","operationsUrl":"http://proxy:8083","maxSessions":1
+	}`, http.StatusCreated)
+	create := doJSON(t, server, http.MethodPost, "/sessions", `{"userId":"user-1","hostId":"host-1","crId":"cr-1"}`, http.StatusCreated)
+	var session model.Session
+	if err := json.Unmarshal(create.Body.Bytes(), &session); err != nil {
+		t.Fatal(err)
+	}
+
+	doJSON(t, server, http.MethodPost, "/sessions/"+session.SessionID+"/audit/records", `{"ownerPodId":"pod-1","ownerInstanceId":"wrong","records":[]}`, http.StatusBadRequest)
+	appendResponse := doJSON(t, server, http.MethodPost, "/sessions/"+session.SessionID+"/audit/records", `{
+		"ownerPodId":"pod-1",
+		"ownerInstanceId":"instance-1",
+		"records":[
+			{"recordType":"command","commandId":"cmd-1","commandText":"pwd"},
+			{"recordType":"output","commandId":"cmd-1","outputDataBase64":"aG9tZQo=","byteCount":5}
+		]
+	}`, http.StatusCreated)
+	if !strings.Contains(appendResponse.Body.String(), `"sequence":1`) {
+		t.Fatalf("append body = %s", appendResponse.Body.String())
+	}
+
+	records := doJSON(t, server, http.MethodGet, "/sessions/"+session.SessionID+"/audit/records?limit=10", ``, http.StatusOK)
+	if !strings.Contains(records.Body.String(), `"commandText":"pwd"`) {
+		t.Fatalf("records body = %s", records.Body.String())
+	}
+	sessions := doJSON(t, server, http.MethodGet, "/sessions/audit?userId=user-1", ``, http.StatusOK)
+	if !strings.Contains(sessions.Body.String(), session.SessionID) {
+		t.Fatalf("audit sessions body = %s", sessions.Body.String())
+	}
+}
+
 func TestPodHTTPValidationAndAvailablePods(t *testing.T) {
 	server := newHTTPTestServer()
 	doJSON(t, server, http.MethodPost, "/proxy-pods/register", `{"podId":"pod-1"}`, http.StatusBadRequest)
