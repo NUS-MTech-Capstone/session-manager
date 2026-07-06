@@ -24,7 +24,7 @@ func main() {
 	}
 	defer closeStore()
 
-	svc := service.New(st, cfg.HeartbeatMaxAge, cfg.LeaseDuration, cfg.AutomationRunTTL, cfg.AuditRetention, cfg.AuditMaxBytes)
+	svc := service.New(st, cfg.HeartbeatMaxAge, cfg.LeaseDuration, cfg.AutomationRunTTL)
 	addr := ":" + cfg.Port
 	slog.Info("server_listening", "addr", addr, "store", cfg.StoreDriver)
 	server := &http.Server{

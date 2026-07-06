@@ -13,8 +13,6 @@ type Config struct {
 	HeartbeatMaxAge  time.Duration
 	LeaseDuration    time.Duration
 	AutomationRunTTL time.Duration
-	AuditRetention   time.Duration
-	AuditMaxBytes    int
 }
 
 func Load() Config {
@@ -25,8 +23,6 @@ func Load() Config {
 		HeartbeatMaxAge:  secondsEnv("HEARTBEAT_MAX_AGE_SECONDS", 15),
 		LeaseDuration:    secondsEnv("SESSION_LEASE_SECONDS", 60),
 		AutomationRunTTL: secondsEnv("AUTOMATION_RUN_TTL_SECONDS", 3600),
-		AuditRetention:   secondsEnv("SESSION_AUDIT_RETENTION_SECONDS", 7*24*3600),
-		AuditMaxBytes:    intEnv("SESSION_AUDIT_MAX_BYTES_PER_SESSION", 16*1024*1024),
 	}
 }
 
@@ -43,12 +39,4 @@ func secondsEnv(key string, fallback int) time.Duration {
 		v = fallback
 	}
 	return time.Duration(v) * time.Second
-}
-
-func intEnv(key string, fallback int) int {
-	v, err := strconv.Atoi(env(key, strconv.Itoa(fallback)))
-	if err != nil {
-		return fallback
-	}
-	return v
 }

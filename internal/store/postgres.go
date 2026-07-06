@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
-	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -88,23 +87,6 @@ CREATE TABLE IF NOT EXISTS sessions (
 	lease_expires_at TIMESTAMPTZ NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS session_audit_records (
-	record_id BIGSERIAL PRIMARY KEY,
-	session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
-	user_id TEXT NOT NULL,
-	host_id TEXT NOT NULL,
-	cr_id TEXT NOT NULL,
-	record_type TEXT NOT NULL,
-	sequence BIGINT NOT NULL,
-	command_id TEXT NOT NULL DEFAULT '',
-	command_text TEXT NOT NULL DEFAULT '',
-	output_data BYTEA NOT NULL DEFAULT ''::bytea,
-	created_at TIMESTAMPTZ NOT NULL,
-	truncated BOOLEAN NOT NULL DEFAULT FALSE,
-	byte_count INTEGER NOT NULL DEFAULT 0,
-	UNIQUE (session_id, sequence)
-);
-
 CREATE INDEX IF NOT EXISTS proxy_pods_assignment_idx
 	ON proxy_pods (status, active_sessions, pod_id);
 
@@ -120,11 +102,6 @@ CREATE INDEX IF NOT EXISTS automation_runs_incident_idx
 CREATE INDEX IF NOT EXISTS sessions_rejoin_lookup_idx
 	ON sessions (user_id, host_id, cr_id, status, created_at DESC);
 
-CREATE INDEX IF NOT EXISTS session_audit_records_session_sequence_idx
-	ON session_audit_records (session_id, sequence);
-
-CREATE INDEX IF NOT EXISTS session_audit_records_lookup_idx
-	ON session_audit_records (user_id, host_id, cr_id, created_at DESC);
 `
 	if _, err := s.db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("migrate postgres store: %w", err)
@@ -555,219 +532,6 @@ FOR UPDATE
 	return session, nil
 }
 
-func (s *PostgresStore) AppendSessionAuditRecords(
-	ctx context.Context,
-	sessionID string,
-	req model.AppendSessionAuditRecordsRequest,
-	retention time.Duration,
-	maxBytes int,
-) ([]model.SessionAuditRecord, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("begin append session audit: %w", err)
-	}
-	defer tx.Rollback()
-	if err := s.pruneAudit(ctx, tx, retention); err != nil {
-		return nil, err
-	}
-
-	const selectSession = `
-SELECT session_id, user_id, host_id, cr_id, connection_type, owner_pod_id, owner_instance_id,
-	websocket_url, status, created_at, last_heartbeat_at, lease_expires_at
-FROM sessions
-WHERE session_id = $1
-FOR UPDATE
-`
-	var session model.Session
-	err = scanSession(tx.QueryRowContext(ctx, selectSession, sessionID), &session)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("select session for audit append: %w", err)
-	}
-	if session.OwnerPodID != req.OwnerPodID || session.OwnerInstanceID != req.OwnerInstanceID {
-		return nil, errors.New("session owner mismatch")
-	}
-	if len(req.Records) == 0 {
-		return []model.SessionAuditRecord{}, nil
-	}
-
-	var sequence int64
-	if err := tx.QueryRowContext(ctx, `
-SELECT COALESCE(MAX(sequence), 0)
-FROM session_audit_records
-WHERE session_id = $1
-`, sessionID).Scan(&sequence); err != nil {
-		return nil, fmt.Errorf("read session audit sequence: %w", err)
-	}
-	var usedBytes int
-	if err := tx.QueryRowContext(ctx, `
-SELECT COALESCE(SUM(
-	CASE
-		WHEN record_type = $2 THEN octet_length(command_text::bytea)
-		WHEN record_type = $3 THEN octet_length(output_data)
-		ELSE 0
-	END
-), 0)::INTEGER
-FROM session_audit_records
-WHERE session_id = $1
-`, sessionID, model.AuditRecordCommand, model.AuditRecordOutput).Scan(&usedBytes); err != nil {
-		return nil, fmt.Errorf("read session audit byte total: %w", err)
-	}
-
-	appended := make([]model.SessionAuditRecord, 0, len(req.Records))
-	for _, incoming := range req.Records {
-		record, addBytes, err := buildAuditRecord(session, incoming, s.now().UTC())
-		if err != nil {
-			return nil, err
-		}
-		if maxBytes > 0 && usedBytes+addBytes > maxBytes {
-			remaining := maxBytes - usedBytes
-			if remaining < 0 {
-				remaining = 0
-			}
-			truncateAuditRecord(&record, remaining)
-			addBytes = remaining
-		}
-		sequence++
-		record.Sequence = sequence
-		outputData, err := base64.StdEncoding.DecodeString(record.OutputDataBase64)
-		if record.OutputDataBase64 == "" {
-			outputData = nil
-			err = nil
-		}
-		if err != nil {
-			return nil, fmt.Errorf("decode audit output: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx, `
-INSERT INTO session_audit_records (
-	session_id, user_id, host_id, cr_id, record_type, sequence, command_id,
-	command_text, output_data, created_at, truncated, byte_count
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-`, record.SessionID, record.UserID, record.HostID, record.CRID, record.RecordType, record.Sequence,
-			record.CommandID, record.CommandText, outputData, record.CreatedAt, record.Truncated, record.ByteCount,
-		); err != nil {
-			return nil, fmt.Errorf("insert session audit record: %w", err)
-		}
-		appended = append(appended, record)
-		usedBytes += addBytes
-		if record.Truncated {
-			break
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit session audit append: %w", err)
-	}
-	return appended, nil
-}
-
-func (s *PostgresStore) ListSessionAuditRecords(
-	ctx context.Context,
-	sessionID string,
-	filter model.ListSessionAuditRecordsFilter,
-	retention time.Duration,
-) ([]model.SessionAuditRecord, error) {
-	if err := s.pruneAudit(ctx, s.db, retention); err != nil {
-		return nil, err
-	}
-	if _, err := s.GetSession(ctx, sessionID); err != nil {
-		return nil, err
-	}
-	rows, err := s.db.QueryContext(ctx, `
-SELECT session_id, user_id, host_id, cr_id, record_type, sequence, command_id,
-	command_text, output_data, created_at, truncated, byte_count
-FROM session_audit_records
-WHERE session_id = $1 AND sequence > $2
-ORDER BY sequence
-LIMIT $3
-`, sessionID, filter.AfterSequence, filter.Limit)
-	if err != nil {
-		return nil, fmt.Errorf("list session audit records: %w", err)
-	}
-	defer rows.Close()
-	records := make([]model.SessionAuditRecord, 0)
-	for rows.Next() {
-		var record model.SessionAuditRecord
-		if err := scanAuditRecord(rows, &record); err != nil {
-			return nil, err
-		}
-		records = append(records, record)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list session audit records: %w", err)
-	}
-	return records, nil
-}
-
-func (s *PostgresStore) ListAuditSessions(
-	ctx context.Context,
-	filter model.ListAuditSessionsFilter,
-	retention time.Duration,
-) ([]model.AuditSessionSummary, error) {
-	if err := s.pruneAudit(ctx, s.db, retention); err != nil {
-		return nil, err
-	}
-	rows, err := s.db.QueryContext(ctx, `
-SELECT s.session_id, s.user_id, s.host_id, s.cr_id, s.connection_type, s.status,
-	s.created_at, MAX(a.created_at) AS last_audit_at, COUNT(*)::INTEGER AS record_count,
-	BOOL_OR(a.truncated) AS truncated
-FROM sessions s
-JOIN session_audit_records a ON a.session_id = s.session_id
-WHERE ($1 = '' OR s.session_id = $1)
-	AND ($2 = '' OR s.user_id = $2)
-	AND ($3 = '' OR s.host_id = $3)
-	AND ($4 = '' OR s.cr_id = $4)
-	AND ($5::timestamptz IS NULL OR a.created_at >= $5)
-	AND ($6::timestamptz IS NULL OR a.created_at <= $6)
-GROUP BY s.session_id, s.user_id, s.host_id, s.cr_id, s.connection_type, s.status, s.created_at
-ORDER BY last_audit_at DESC, s.session_id
-LIMIT $7 OFFSET $8
-`, filter.SessionID, filter.UserID, filter.HostID, filter.CRID,
-		nullableTime(filter.From), nullableTime(filter.To), filter.Limit, filter.Offset,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("list audit sessions: %w", err)
-	}
-	defer rows.Close()
-	summaries := make([]model.AuditSessionSummary, 0)
-	for rows.Next() {
-		var summary model.AuditSessionSummary
-		if err := rows.Scan(
-			&summary.SessionID,
-			&summary.UserID,
-			&summary.HostID,
-			&summary.CRID,
-			&summary.ConnectionType,
-			&summary.Status,
-			&summary.CreatedAt,
-			&summary.LastAuditAt,
-			&summary.RecordCount,
-			&summary.Truncated,
-		); err != nil {
-			return nil, fmt.Errorf("scan audit session: %w", err)
-		}
-		summaries = append(summaries, summary)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list audit sessions: %w", err)
-	}
-	return summaries, nil
-}
-
-func (s *PostgresStore) pruneAudit(ctx context.Context, executor queryExecutor, retention time.Duration) error {
-	if retention <= 0 {
-		return nil
-	}
-	if _, err := executor.ExecContext(ctx, `
-DELETE FROM session_audit_records
-WHERE created_at < $1
-`, s.now().UTC().Add(-retention)); err != nil {
-		return fmt.Errorf("prune session audit records: %w", err)
-	}
-	return nil
-}
-
 type queryExecutor interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }
@@ -844,37 +608,6 @@ func scanSession(row rowScanner, session *model.Session) error {
 		&session.LastHeartbeatAt,
 		&session.LeaseExpiresAt,
 	)
-}
-
-func scanAuditRecord(row rowScanner, record *model.SessionAuditRecord) error {
-	var outputData []byte
-	if err := row.Scan(
-		&record.SessionID,
-		&record.UserID,
-		&record.HostID,
-		&record.CRID,
-		&record.RecordType,
-		&record.Sequence,
-		&record.CommandID,
-		&record.CommandText,
-		&outputData,
-		&record.CreatedAt,
-		&record.Truncated,
-		&record.ByteCount,
-	); err != nil {
-		return err
-	}
-	if len(outputData) > 0 {
-		record.OutputDataBase64 = base64.StdEncoding.EncodeToString(outputData)
-	}
-	return nil
-}
-
-func nullableTime(value time.Time) any {
-	if value.IsZero() {
-		return nil
-	}
-	return value
 }
 
 func sessionID() (string, error) {
