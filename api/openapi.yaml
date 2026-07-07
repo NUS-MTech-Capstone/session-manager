@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: DenDenMushi Session Manager API
   version: 0.1.0
-  description: Internal session registry, proxy pod assignment, lease, and automation run API.
+  description: Internal session registry, proxy pod assignment, lease, and automation run API. Business endpoints require the `x-api-version: 1` header; probe and OpenAPI endpoints are exempt.
 servers:
   - url: http://localhost:8082
 paths:

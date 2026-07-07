@@ -33,6 +33,7 @@ func TestCreateSessionHTTPValidationAndNoCapacity(t *testing.T) {
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodPost, "/sessions", strings.NewReader(tt.body))
 			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set(apiVersionHeader, supportedAPIVersion)
 			server.ServeHTTP(rec, req)
 			if rec.Code != tt.status {
 				t.Fatalf("status = %d, want %d, body=%s", rec.Code, tt.status, rec.Body.String())
@@ -120,6 +121,7 @@ func doJSON(t *testing.T, server *Server, method, path, body string, wantStatus 
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	req.Header.Set(apiVersionHeader, supportedAPIVersion)
 	server.ServeHTTP(rec, req)
 	if rec.Code != wantStatus {
 		t.Fatalf("%s %s status = %d, want %d, body=%s", method, path, rec.Code, wantStatus, rec.Body.String())
