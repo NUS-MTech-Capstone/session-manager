@@ -73,6 +73,7 @@ func TestSessionHTTPCreateHeartbeatListAndClose(t *testing.T) {
 func TestPodHTTPValidationAndAvailablePods(t *testing.T) {
 	server := newHTTPTestServer()
 	doJSON(t, server, http.MethodPost, "/proxy-pods/register", `{"podId":"pod-1"}`, http.StatusBadRequest)
+	doJSON(t, server, http.MethodPost, "/proxy-pods/heartbeat", `{}`, http.StatusBadRequest)
 	doJSON(t, server, http.MethodPost, "/proxy-pods/register", `{
 		"podId":"pod-1","instanceId":"instance-1","websocketUrl":"wss://proxy","operationsUrl":"http://proxy:8083","maxSessions":2
 	}`, http.StatusCreated)
@@ -89,6 +90,8 @@ func TestSessionHTTPGetAndUnknownActions(t *testing.T) {
 	server := newHTTPTestServer()
 	doJSON(t, server, http.MethodGet, "/sessions/missing", ``, http.StatusNotFound)
 	doJSON(t, server, http.MethodPost, "/sessions/sess-1/unknown", `{}`, http.StatusNotFound)
+	doJSON(t, server, http.MethodPost, "/sessions/sess-1/heartbeat", `{`, http.StatusBadRequest)
+	doJSON(t, server, http.MethodPost, "/automation/runs/run-1/unknown", `{`, http.StatusNotFound)
 }
 
 func TestAutomationRunHTTPLifecycle(t *testing.T) {
