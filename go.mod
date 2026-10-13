@@ -1,12 +1,14 @@
 module github.com/NUS-MTech-Capstone/session-manager
 
-go 1.26.4
+go 1.26.9
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/aws/aws-sdk-go-v2 v1.42.0
 	github.com/aws/aws-sdk-go-v2/config v1.32.25
-	github.com/jackc/pgx/v5 v5.7.6
+	github.com/jackc/pgx/v5 v5.9.2
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -25,7 +27,8 @@ require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
-	golang.org/x/crypto v0.37.0 // indirect
-	golang.org/x/sync v0.13.0 // indirect
-	golang.org/x/text v0.24.0 // indirect
+	github.com/kr/text v0.2.0 // indirect
+	github.com/rogpeppe/go-internal v1.16.0 // indirect
+	golang.org/x/sync v0.24.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
 )
