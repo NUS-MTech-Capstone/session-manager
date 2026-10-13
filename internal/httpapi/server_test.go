@@ -123,6 +123,7 @@ func doJSON(t *testing.T, server *Server, method, path, body string, wantStatus 
 	}
 	req.Header.Set(apiVersionHeader, supportedAPIVersion)
 	server.ServeHTTP(rec, req)
+	assertContractResponse(t, method, path, rec)
 	if rec.Code != wantStatus {
 		t.Fatalf("%s %s status = %d, want %d, body=%s", method, path, rec.Code, wantStatus, rec.Body.String())
 	}
