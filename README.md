@@ -1,6 +1,6 @@
 # Session Manager
 
-Registry for active sessions and proxy dataplane pods. It supports an in-memory store for  local runs and Postgres for durable deployments.
+Registry for active sessions and proxy dataplane pods. It supports an in-memory store for local runs and Postgres for durable deployments.
 
 ## Run
 
@@ -115,32 +115,18 @@ Session heartbeat and close requests must include the assigned owner:
 }
 ```
 
-## API Specification
-
-The OpenAPI contract is checked in at `api/openapi.yaml` and is served
-unauthenticated at:
-
-```http
-GET /openapi.yaml
-```
-
 Business endpoints require `x-api-version: 1`. `GET /healthz` and
 `GET /openapi.yaml` are exempt so probes and spec reads do not need custom
 headers.
 Successful probe request logs are suppressed; failed probe responses still emit
 request logs.
 
-## API contract verification
+## API contract and CI
 
-`api/openapi.yaml` is the checked-in HTTP contract, served byte-for-byte at
-`GET /openapi.yaml`. CI validates it with `openapi-spec-validator==0.9.0`.
-Handler tests validate representative success and error responses against its
-schemas, including missing and unsupported API versions. Business HTTP calls
-require `x-api-version: 1`; the specification declares route exemptions and
-any transport-specific alternatives. Run the repository test suite when
-changing handlers or response models, and update the contract in the same PR.
+[OpenAPI contract](api/openapi.yaml), served byte-for-byte at `GET /openapi.yaml`.
+CI validates it with `openapi-spec-validator==0.9.0`; handler tests check success,
+error and API-version responses. Update the specification alongside handler changes.
 
-The Image workflow runs only after successful CI for a push to `main`. It builds
-the tested source SHA, retains that SHA as a traceability tag, and promotes the
-build's `sha256` digest through a Kubernetes PR. Promotion requires the digest;
-Argo CD deploys that immutable reference after the GitOps PR is merged.
+After successful `main` CI, the Image workflow builds the tested source SHA
+and opens a Kubernetes promotion PR with its immutable image digest. Argo CD
+deploys after that PR is merged; the commit tag provides source traceability.
